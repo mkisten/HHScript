@@ -56,7 +56,7 @@
 
         .controls-row {
             display: flex;
-            gap: 15px;
+            gap: 12px;
             align-items: center;
             flex-wrap: wrap;
         }
@@ -83,12 +83,12 @@
         }
 
         .btn {
-            padding: 12px 24px;
-            font-size: 1em;
+            padding: 10px 16px;
+            font-size: 0.95em;
             border: none;
-            border-radius: 8px;
+            border-radius: 6px;
             cursor: pointer;
-            transition: all 0.3s;
+            transition: all 0.2s;
             font-weight: 600;
             white-space: nowrap;
         }
@@ -99,19 +99,38 @@
         }
 
         .btn-primary:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 8px 16px rgba(102, 126, 234, 0.4);
-        }
-
-        .btn-primary:disabled {
-            opacity: 0.6;
-            cursor: not-allowed;
-            transform: none;
+            transform: translateY(-1px);
+            box-shadow: 0 4px 10px rgba(102, 126, 234, 0.4);
         }
 
         .btn-success {
             background: #10b981;
             color: white;
+        }
+
+        .btn-success:hover {
+            background: #0da773;
+        }
+
+        .btn-warning {
+            background: #8b5cf6;
+            color: white;
+        }
+
+        .btn-warning:hover {
+            background: #7c3aed;
+        }
+
+        .btn-outline {
+            background: white;
+            color: #667eea;
+            border: 2px solid #667eea;
+        }
+
+        .btn-outline:hover {
+            background: #f0f4ff;
+            border-color: #764ba2;
+            color: #764ba2;
         }
 
         .btn-danger {
@@ -121,6 +140,12 @@
 
         .btn-danger:hover {
             background: #dc2626;
+        }
+
+        .btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
         }
 
         .settings-section {
@@ -145,7 +170,7 @@
             display: flex;
             flex-direction: column;
             gap: 6px;
-            min-width: 220px;
+            min-width: 200px;
         }
 
         .setting-group label {
@@ -155,9 +180,9 @@
         }
 
         .setting-group input {
-            padding: 10px;
+            padding: 8px 10px;
             border: 1px solid #ddd;
-            border-radius: 6px;
+            border-radius: 4px;
             font-size: 1em;
         }
 
@@ -172,8 +197,8 @@
             border: 4px solid #f3f3f3;
             border-top: 4px solid #667eea;
             border-radius: 50%;
-            width: 50px;
-            height: 50px;
+            width: 40px;
+            height: 40px;
             animation: spin 1s linear infinite;
             margin: 20px auto;
         }
@@ -201,16 +226,18 @@
         }
 
         th {
-            padding: 15px;
+            padding: 12px 15px;
             text-align: left;
             font-weight: 600;
             color: #333;
             border-bottom: 2px solid #dee2e6;
+            white-space: nowrap;
         }
 
         td {
-            padding: 15px;
+            padding: 12px 15px;
             border-bottom: 1px solid #e9ecef;
+            vertical-align: middle;
         }
 
         tr:hover {
@@ -219,9 +246,9 @@
 
         .status-badge {
             display: inline-block;
-            padding: 5px 12px;
+            padding: 4px 10px;
             border-radius: 20px;
-            font-size: 0.85em;
+            font-size: 0.8em;
             font-weight: 600;
         }
 
@@ -257,38 +284,63 @@
         }
 
         .message {
-            padding: 15px 30px;
-            margin: 20px 30px;
-            border-radius: 8px;
+            padding: 12px 24px;
+            margin: 16px 30px;
+            border-radius: 6px;
             font-weight: 500;
         }
 
         .message-success {
             background: #d1fae5;
             color: #065f46;
-            border: 2px solid #10b981;
+            border: 1px solid #10b981;
         }
 
         .message-error {
             background: #fee2e2;
             color: #991b1b;
-            border: 2px solid #ef4444;
+            border: 1px solid #ef4444;
+        }
+
+        .checkbox-cell {
+            text-align: center;
+            width: 50px;
+        }
+
+        .checkbox-cell input[type="checkbox"] {
+            transform: scale(1.2);
+            cursor: pointer;
+        }
+
+        /* Кнопки над таблицей */
+        .action-buttons-row {
+            display: flex;
+            gap: 12px;
+            margin: 0 0 20px 30px; /* отступ слева как у таблицы */
+            align-items: center;
+        }
+
+        .action-buttons-row .btn {
+            padding: 8px 16px;
+            font-size: 0.95em;
+            border-radius: 8px;
+            white-space: nowrap;
         }
     </style>
 </head>
 <body>
     <div class="container">
         <div class="header">
-            <h1>🚀 Вакансии</h1>
+            <h1>🚀 Удобные Вакансии</h1>
             <p>Удаленная работа • Россия и Беларусь</p>
         </div>
 
-        <!-- Основные кнопки и статистика -->
+        <!-- Основные кнопки -->
         <div class="controls">
             <div class="stats">
                 <div class="stat-item">
                     <div class="stat-value" id="totalCount">0</div>
-                    <div class="stat-label">Всего вакансий</div>
+                    <div class="stat-label">Всего</div>
                 </div>
                 <div class="stat-item">
                     <div class="stat-value" id="newCount">0</div>
@@ -297,7 +349,7 @@
             </div>
             <div class="controls-row">
                 <button class="btn btn-primary" id="loadBtn" onclick="loadVacancies()">
-                    Загрузить вакансии
+                    Загрузить
                 </button>
                 <button class="btn btn-success" id="updateBtn" onclick="updateVacancies()" style="display:none;">
                     Обновить
@@ -325,20 +377,18 @@
                     <input type="number" id="daysPeriod" min="1" max="30" value="1">
                 </div>
                 <div class="setting-group">
-                    <button class="btn btn-primary" onclick="saveSettings()" style="height: fit-content; padding: 10px 16px;">
-                        Сохранить настройки
+                    <button class="btn btn-primary" onclick="saveSettings()" style="height: fit-content; padding: 8px 14px; font-size: 0.95em;">
+                        Сохранить
                     </button>
                 </div>
             </div>
         </div>
 
-        <!-- Сообщения -->
         <div id="message"></div>
 
-        <!-- Контент (таблица или пустое состояние) -->
         <div id="content">
             <div class="empty-state">
-                <h3>👆 Нажмите «Загрузить вакансии» или «Обновить»</h3>
+                <h3>👆 Нажмите «Загрузить» или «Обновить»</h3>
                 <p>Здесь появится таблица с актуальными Java вакансиями</p>
             </div>
         </div>
@@ -346,8 +396,8 @@
 
     <script>
         let isFirstLoad = true;
+        let currentData = [];
 
-        // Загрузка настроек при старте
         window.addEventListener('DOMContentLoaded', () => {
             fetch('/api/settings')
                 .then(res => res.json())
@@ -356,9 +406,7 @@
                     document.getElementById('excludeWords').value = settings.exclude || 'Android, QA, Тестировщик, Аналитик, C#, архитектор, PHP, Fullstack, 1С, Python, Frontend-разработчик';
                     document.getElementById('daysPeriod').value = settings.days || 1;
                 })
-                .catch(err => {
-                    console.warn('Не удалось загрузить настройки:', err);
-                });
+                .catch(err => console.warn('Не удалось загрузить настройки:', err));
         });
 
         function showLoading() {
@@ -373,9 +421,7 @@
         function showMessage(text, type = 'success') {
             const messageDiv = document.getElementById('message');
             messageDiv.innerHTML = `<div class="message message-${type}">${text}</div>`;
-            setTimeout(() => {
-                messageDiv.innerHTML = '';
-            }, 5000);
+            setTimeout(() => messageDiv.innerHTML = '', 5000);
         }
 
         function updateStats(data) {
@@ -385,23 +431,39 @@
         }
 
         function renderTable(data) {
+            currentData = data;
+            updateStats(data);
+
             if (data.length === 0) {
                 document.getElementById('content').innerHTML = `
                     <div class="empty-state">
                         <h3>Вакансии не найдены</h3>
-                        <p>Попробуйте изменить настройки поиска и нажать «Обновить»</p>
+                        <p>Попробуйте изменить настройки и нажать «Обновить»</p>
                     </div>
                 `;
                 return;
             }
 
-            updateStats(data);
+            // Кнопки над таблицей — только если есть новые вакансии
+            const hasNew = data.some(v => v.status === 'NEW');
+            const actionButtons = hasNew ? `
+                <div class="action-buttons-row">
+                    <button class="btn btn-outline" onclick="selectAllNew()">
+                        Выбрать все новые
+                    </button>
+                    <button class="btn btn-warning" onclick="applyMarkAsOld()">
+                        Пометить выбранные как просмотренные
+                    </button>
+                </div>
+            ` : '';
 
             let html = `
+                ${actionButtons}
                 <div class="table-container">
                     <table>
                         <thead>
                             <tr>
+                                <th style="width: 50px;"></th>
                                 <th>Статус</th>
                                 <th>Название</th>
                                 <th>Компания</th>
@@ -414,11 +476,16 @@
                         <tbody>
             `;
 
-            data.forEach(v => {
+            data.forEach((v, index) => {
                 const statusClass = v.status === 'NEW' ? 'status-new' : 'status-old';
-                const statusText = v.status === 'NEW' ? 'Новая' : 'Старая';
+                const statusText = v.status === 'NEW' ? 'Новая' : 'Просмотрена';
+                const checkbox = v.status === 'NEW'
+                    ? `<input type="checkbox" class="vacancy-checkbox" data-index="${index}">`
+                    : '';
+
                 html += `
                     <tr>
+                        <td class="checkbox-cell">${checkbox}</td>
                         <td><span class="status-badge ${statusClass}">${statusText}</span></td>
                         <td>${v.title || '-'}</td>
                         <td>${v.company || '-'}</td>
@@ -448,7 +515,6 @@
                 const response = await fetch('/api/vacancies');
                 const data = await response.json();
 
-                // Если первый запуск и данных нет — сразу обновляем
                 if (isFirstLoad && data.length === 0) {
                     btn.disabled = false;
                     await updateVacancies();
@@ -456,12 +522,11 @@
                 }
 
                 renderTable(data);
-
                 document.getElementById('loadBtn').style.display = 'none';
                 document.getElementById('updateBtn').style.display = 'block';
                 isFirstLoad = false;
             } catch (error) {
-                showMessage('Ошибка загрузки данных: ' + error.message, 'error');
+                showMessage('Ошибка загрузки: ' + error.message, 'error');
                 btn.disabled = false;
             }
         }
@@ -478,18 +543,64 @@
 
                 if (result.success) {
                     renderTable(result.data);
-                    showMessage(`✅ Обновление завершено! Найдено ${result.new_count} новых вакансий. Всего: ${result.total_count}`);
+                    showMessage(`✅ Обновлено! Новых: ${result.new_count}. Всего: ${result.total_count}`);
                 } else {
-                    showMessage('❌ Ошибка обновления: ' + result.error, 'error');
+                    showMessage('❌ Ошибка: ' + result.error, 'error');
                 }
             } catch (error) {
-                showMessage('❌ Ошибка обновления: ' + error.message, 'error');
+                showMessage('❌ Ошибка сети: ' + error.message, 'error');
             } finally {
                 btn.disabled = false;
                 btn.textContent = 'Обновить';
-                // Убедимся, что кнопки в правильном состоянии
                 document.getElementById('loadBtn').style.display = 'none';
                 document.getElementById('updateBtn').style.display = 'block';
+            }
+        }
+
+        function selectAllNew() {
+            const checkboxes = document.querySelectorAll('.vacancy-checkbox');
+            const allChecked = Array.from(checkboxes).every(cb => cb.checked);
+            const newState = !allChecked;
+            checkboxes.forEach(cb => cb.checked = newState);
+        }
+
+        async function applyMarkAsOld() {
+            const checkboxes = document.querySelectorAll('.vacancy-checkbox:checked');
+            if (checkboxes.length === 0) {
+                showMessage('Не выбрано ни одной вакансии', 'error');
+                return;
+            }
+
+            const selectedLinks = Array.from(checkboxes)
+                .map(cb => {
+                    const index = parseInt(cb.dataset.index);
+                    return currentData[index].link;
+                });
+
+            const btn = document.querySelector('.btn-warning');
+            const originalText = btn.textContent;
+            btn.disabled = true;
+            btn.textContent = 'Применение...';
+
+            try {
+                const response = await fetch('/api/mark-as-old', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ links: selectedLinks })
+                });
+                const result = await response.json();
+
+                if (result.success) {
+                    renderTable(result.data);
+                    showMessage(`✅ Помечено как просмотренные: ${result.updated_count} вакансий`, 'success');
+                } else {
+                    showMessage('❌ Ошибка: ' + result.error, 'error');
+                }
+            } catch (error) {
+                showMessage('❌ Ошибка сети: ' + error.message, 'error');
+            } finally {
+                btn.disabled = false;
+                btn.textContent = originalText;
             }
         }
 
@@ -499,7 +610,7 @@
             const days = parseInt(document.getElementById('daysPeriod').value) || 1;
 
             if (!query) {
-                showMessage('Укажите ключевое слово для поиска', 'error');
+                showMessage('Укажите ключевое слово', 'error');
                 return;
             }
 
@@ -510,28 +621,24 @@
                     body: JSON.stringify({ query, exclude, days })
                 });
                 const result = await response.json();
-
                 if (result.success) {
-                    showMessage('✅ Настройки успешно сохранены!', 'success');
+                    showMessage('✅ Настройки сохранены!', 'success');
                 } else {
                     showMessage('❌ Ошибка: ' + (result.error || 'Неизвестная ошибка'), 'error');
                 }
             } catch (err) {
-                showMessage('❌ Ошибка сети при сохранении настроек', 'error');
+                showMessage('❌ Ошибка сети', 'error');
             }
         }
 
         async function exitApp() {
-            if (!confirm('Вы уверены, что хотите выйти из приложения?')) return;
-
+            if (!confirm('Вы уверены, что хотите выйти?')) return;
             try {
                 await fetch('/api/exit', { method: 'POST' });
                 showMessage('Приложение завершает работу...', 'success');
-                setTimeout(() => {
-                    window.close();
-                }, 1000);
+                setTimeout(() => window.close(), 1000);
             } catch (err) {
-                alert('Сервер остановлен. Закройте вкладку вручную.');
+                alert('Сервер остановлен. Закройте вкладку.');
                 window.close();
             }
         }
