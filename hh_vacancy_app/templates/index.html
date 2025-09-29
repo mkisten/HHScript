@@ -1,0 +1,387 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Java вакансии - HH.ru</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 16px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+
+        .header h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+        }
+
+        .header p {
+            font-size: 1.1em;
+            opacity: 0.9;
+        }
+
+        .controls {
+            padding: 30px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 2px solid #f0f0f0;
+        }
+
+        .stats {
+            display: flex;
+            gap: 30px;
+        }
+
+        .stat-item {
+            text-align: center;
+        }
+
+        .stat-value {
+            font-size: 2em;
+            font-weight: bold;
+            color: #667eea;
+        }
+
+        .stat-label {
+            color: #666;
+            font-size: 0.9em;
+            margin-top: 5px;
+        }
+
+        .btn {
+            padding: 15px 40px;
+            font-size: 1.1em;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.3s;
+            font-weight: 600;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(102, 126, 234, 0.4);
+        }
+
+        .btn-primary:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .btn-success {
+            background: #10b981;
+            color: white;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 60px;
+            font-size: 1.3em;
+            color: #667eea;
+        }
+
+        .spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #667eea;
+            border-radius: 50%;
+            width: 50px;
+            height: 50px;
+            animation: spin 1s linear infinite;
+            margin: 20px auto;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .table-container {
+            padding: 0 30px 30px 30px;
+            overflow-x: auto;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+        }
+
+        thead {
+            background: #f8f9fa;
+            position: sticky;
+            top: 0;
+        }
+
+        th {
+            padding: 15px;
+            text-align: left;
+            font-weight: 600;
+            color: #333;
+            border-bottom: 2px solid #dee2e6;
+        }
+
+        td {
+            padding: 15px;
+            border-bottom: 1px solid #e9ecef;
+        }
+
+        tr:hover {
+            background: #f8f9fa;
+        }
+
+        .status-badge {
+            display: inline-block;
+            padding: 5px 12px;
+            border-radius: 20px;
+            font-size: 0.85em;
+            font-weight: 600;
+        }
+
+        .status-new {
+            background: #d1fae5;
+            color: #065f46;
+        }
+
+        .status-old {
+            background: #fee2e2;
+            color: #991b1b;
+        }
+
+        .vacancy-link {
+            color: #667eea;
+            text-decoration: none;
+            font-weight: 500;
+        }
+
+        .vacancy-link:hover {
+            text-decoration: underline;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 60px;
+            color: #666;
+        }
+
+        .empty-state h3 {
+            font-size: 1.5em;
+            margin-bottom: 10px;
+        }
+
+        .message {
+            padding: 15px 30px;
+            margin: 20px 30px;
+            border-radius: 8px;
+            font-weight: 500;
+        }
+
+        .message-success {
+            background: #d1fae5;
+            color: #065f46;
+            border: 2px solid #10b981;
+        }
+
+        .message-error {
+            background: #fee2e2;
+            color: #991b1b;
+            border: 2px solid #ef4444;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🚀 Java Backend Вакансии</h1>
+            <p>Удаленная работа • Россия и Беларусь</p>
+        </div>
+
+        <div class="controls">
+            <div class="stats">
+                <div class="stat-item">
+                    <div class="stat-value" id="totalCount">0</div>
+                    <div class="stat-label">Всего вакансий</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-value" id="newCount">0</div>
+                    <div class="stat-label">Новых</div>
+                </div>
+            </div>
+            <button class="btn btn-primary" id="loadBtn" onclick="loadVacancies()">
+                Загрузить вакансии
+            </button>
+            <button class="btn btn-success" id="updateBtn" onclick="updateVacancies()" style="display:none;">
+                Обновить
+            </button>
+        </div>
+
+        <div id="message"></div>
+
+        <div id="content">
+            <div class="empty-state">
+                <h3>👆 Нажмите кнопку для загрузки вакансий</h3>
+                <p>Здесь появится таблица с актуальными Java вакансиями</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let isFirstLoad = true;
+
+        function showLoading() {
+            document.getElementById('content').innerHTML = `
+                <div class="loading">
+                    <div class="spinner"></div>
+                    <p>Загрузка вакансий...</p>
+                </div>
+            `;
+        }
+
+        function showMessage(text, type = 'success') {
+            const messageDiv = document.getElementById('message');
+            messageDiv.innerHTML = `<div class="message message-${type}">${text}</div>`;
+            setTimeout(() => {
+                messageDiv.innerHTML = '';
+            }, 5000);
+        }
+
+        function updateStats(data) {
+            const newCount = data.filter(v => v.status === 'NEW').length;
+            document.getElementById('totalCount').textContent = data.length;
+            document.getElementById('newCount').textContent = newCount;
+        }
+
+        function renderTable(data) {
+            if (data.length === 0) {
+                document.getElementById('content').innerHTML = `
+                    <div class="empty-state">
+                        <h3>Вакансии не найдены</h3>
+                        <p>Попробуйте обновить позже</p>
+                    </div>
+                `;
+                return;
+            }
+
+            updateStats(data);
+
+            let html = `
+                <div class="table-container">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Статус</th>
+                                <th>Название</th>
+                                <th>Компания</th>
+                                <th>Город</th>
+                                <th>Зарплата</th>
+                                <th>Дата</th>
+                                <th>Ссылка</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+            `;
+
+            data.forEach(v => {
+                const statusClass = v.status === 'NEW' ? 'status-new' : 'status-old';
+                html += `
+                    <tr>
+                        <td><span class="status-badge ${statusClass}">${v.status}</span></td>
+                        <td>${v.title || '-'}</td>
+                        <td>${v.company || '-'}</td>
+                        <td>${v.city || '-'}</td>
+                        <td>${v.salary || '-'}</td>
+                        <td>${v.date || '-'}</td>
+                        <td><a href="${v.link}" target="_blank" class="vacancy-link">Открыть</a></td>
+                    </tr>
+                `;
+            });
+
+            html += `
+                        </tbody>
+                    </table>
+                </div>
+            `;
+
+            document.getElementById('content').innerHTML = html;
+        }
+
+        async function loadVacancies() {
+            const btn = document.getElementById('loadBtn');
+            btn.disabled = true;
+            showLoading();
+
+            try {
+                const response = await fetch('/api/vacancies');
+                const data = await response.json();
+
+                renderTable(data);
+
+                document.getElementById('loadBtn').style.display = 'none';
+                document.getElementById('updateBtn').style.display = 'block';
+
+                if (isFirstLoad && data.length === 0) {
+                    showMessage('Данных нет. Нажмите "Обновить" для загрузки вакансий', 'error');
+                }
+                isFirstLoad = false;
+            } catch (error) {
+                showMessage('Ошибка загрузки данных: ' + error.message, 'error');
+                btn.disabled = false;
+            }
+        }
+
+        async function updateVacancies() {
+            const btn = document.getElementById('updateBtn');
+            btn.disabled = true;
+            btn.textContent = 'Обновление...';
+            showLoading();
+
+            try {
+                const response = await fetch('/api/update');
+                const result = await response.json();
+
+                if (result.success) {
+                    renderTable(result.data);
+                    showMessage(`✅ Обновление завершено! Найдено ${result.new_count} новых вакансий. Всего: ${result.total_count}`);
+                } else {
+                    showMessage('❌ Ошибка обновления: ' + result.error, 'error');
+                }
+            } catch (error) {
+                showMessage('❌ Ошибка обновления: ' + error.message, 'error');
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Обновить';
+            }
+        }
+    </script>
+</body>
+</html>
