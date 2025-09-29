@@ -1,249 +1,352 @@
-from flask import Flask, render_template, jsonify, request
+# desktop_app.py
+import customtkinter as ctk
+from tkinter import ttk, messagebox, BooleanVar
 import requests
 import pandas as pd
 from datetime import datetime, timedelta
 import os
-import webbrowser
-import sys
 import json
-import signal
-from threading import Timer
+import webbrowser
+import threading
 
-app = Flask(__name__)
+# Настройки
+ctk.set_appearance_mode("light")
+ctk.set_default_color_theme("blue")
 
-API_URL = "https://api.hh.ru/vacancies"
 DATA_FILE = "vacancies_data.json"
 SETTINGS_FILE = "settings.json"
 
-# Значения по умолчанию
 DEFAULT_SETTINGS = {
     "query": "Java разработчик",
     "exclude": "Android, QA, Тестировщик, Аналитик, C#, архитектор, PHP, Fullstack, 1С, Python, Frontend-разработчик",
     "days": 1
 }
 
+class VacancyApp:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("Java Backend Вакансии — HH.ru")
+        self.root.geometry("1400x900")
+        self.root.minsize(1000, 700)
 
-def load_settings():
-    if os.path.exists(SETTINGS_FILE):
-        try:
-            with open(SETTINGS_FILE, 'r', encoding='utf-8') as f:
-                settings = json.load(f)
-                settings.setdefault('query', DEFAULT_SETTINGS['query'])
-                settings.setdefault('exclude', DEFAULT_SETTINGS['exclude'])
-                settings.setdefault('days', DEFAULT_SETTINGS['days'])
-                return settings
-        except Exception:
-            pass
-    return DEFAULT_SETTINGS.copy()
+        self.vacancies = []
+        self.check_vars = []  # для чекбоксов
 
+        self.load_settings()
+        self.create_widgets()
+        self.load_vacancies_from_file()
 
-def save_settings(settings):
-    with open(SETTINGS_FILE, 'w', encoding='utf-8') as f:
-        json.dump(settings, f, ensure_ascii=False, indent=2)
+    def load_settings(self):
+        if os.path.exists(SETTINGS_FILE):
+            try:
+                with open(SETTINGS_FILE, 'r', encoding='utf-8') as f:
+                    self.settings = json.load(f)
+            except:
+                self.settings = DEFAULT_SETTINGS.copy()
+        else:
+            self.settings = DEFAULT_SETTINGS.copy()
 
+    def save_settings(self):
+        with open(SETTINGS_FILE, 'w', encoding='utf-8') as f:
+            json.dump(self.settings, f, ensure_ascii=False, indent=2)
 
-def build_search_text(query, exclude_words):
-    exclude_list = [w.strip() for w in exclude_words.split(',') if w.strip()]
-    exclude_str = " NOT ".join(exclude_list)
-    if exclude_str:
-        return f"{query} NOT {exclude_str}"
-    return query
+    def build_search_text(self):
+        exclude_list = [w.strip() for w in self.settings['exclude'].split(',') if w.strip()]
+        exclude_str = " NOT ".join(exclude_list)
+        return f"{self.settings['query']} NOT {exclude_str}" if exclude_str else self.settings['query']
 
+    def get_vacancies_from_api(self):
+        date_from = (datetime.now() - timedelta(days=int(self.settings['days']))).strftime("%Y-%m-%dT%H:%M:%S")
+        search_text = self.build_search_text()
 
-def get_vacancies_from_api():
-    """Получение вакансий с API HH.ru с учётом настроек"""
-    settings = load_settings()
-    date_from = (datetime.now() - timedelta(days=int(settings['days']))).strftime("%Y-%m-%dT%H:%M:%S")
-    search_text = build_search_text(settings['query'], settings['exclude'])
+        params = {
+            "text": search_text,
+            "area": [113, 16],
+            "schedule": "remote",
+            "per_page": 50,
+            "page": 0,
+            "date_from": date_from,
+            "professional_role": 96
+        }
 
-    params = {
-        "text": search_text,
-        "area": [113, 16],  # Россия и Беларусь
-        "schedule": "remote",
-        "per_page": 50,
-        "page": 0,
-        "date_from": date_from,
-        "professional_role": 96  # Backend-разработчик
-    }
+        vacancies = []
+        API_URL = "https://api.hh.ru/vacancies"
 
-    vacancies = []
+        while True:
+            try:
+                resp = requests.get(API_URL, params=params, timeout=10)
+                if resp.status_code != 200:
+                    break
+                data = resp.json()
 
-    while True:
-        try:
-            resp = requests.get(API_URL, params=params, timeout=10)
-            if resp.status_code != 200:
-                print(f"Ошибка API: {resp.status_code}")
-                break
-            data = resp.json()
-
-            for item in data.get("items", []):
-                salary_info = item.get("salary")
-                if salary_info:
-                    salary_from = salary_info.get('from') or ''
-                    salary_to = salary_info.get('to') or ''
-                    currency = salary_info.get('currency') or ''
-                    salary_parts = []
-                    if salary_from:
-                        salary_parts.append(str(salary_from))
-                    if salary_to:
-                        salary_parts.append(str(salary_to))
-                    salary = " - ".join(salary_parts)
-                    if currency:
-                        salary += f" {currency}"
-                    if not salary:
+                for item in data.get("items", []):
+                    salary_info = item.get("salary")
+                    if salary_info:
+                        s_from = salary_info.get('from') or ''
+                        s_to = salary_info.get('to') or ''
+                        curr = salary_info.get('currency') or ''
+                        salary_parts = []
+                        if s_from: salary_parts.append(str(s_from))
+                        if s_to: salary_parts.append(str(s_to))
+                        salary = " - ".join(salary_parts)
+                        if curr: salary += f" {curr}"
+                        if not salary: salary = "не указана"
+                    else:
                         salary = "не указана"
+
+                    raw_date = item.get("published_at")
+                    date_str = raw_date[:10] if isinstance(raw_date, str) and len(raw_date) >= 10 else ''
+
+                    vacancies.append({
+                        "title": item.get("name", "-"),
+                        "company": item.get("employer", {}).get("name", "-"),
+                        "city": item.get("area", {}).get("name", "-"),
+                        "salary": salary,
+                        "date": date_str,
+                        "link": item.get("alternate_url", "#"),
+                        "status": "NEW"
+                    })
+
+                if data.get("pages") and params["page"] < data["pages"] - 1:
+                    params["page"] += 1
                 else:
-                    salary = "не указана"
-
-                vacancy = {
-                    "title": item.get("name"),
-                    "company": item.get("employer", {}).get("name"),
-                    "city": item.get("area", {}).get("name"),
-                    "salary": salary,
-                    "date": item.get("published_at", "")[:10],
-                    "link": item.get("alternate_url"),
-                    "status": "NEW"
-                }
-                vacancies.append(vacancy)
-
-            if data.get("pages") and params["page"] < data["pages"] - 1:
-                params["page"] += 1
-            else:
+                    break
+            except Exception as e:
+                print(f"Ошибка API: {e}")
                 break
-        except Exception as e:
-            print(f"Ошибка при получении данных: {e}")
-            break
+        return vacancies
 
-    return vacancies
+    def load_vacancies_from_file(self):
+        if os.path.exists(DATA_FILE):
+            try:
+                df = pd.read_json(DATA_FILE, encoding='utf-8')
+                self.vacancies = df.to_dict('records')
+            except:
+                self.vacancies = []
+        else:
+            self.vacancies = []
+        self.update_table()
 
+    def save_vacancies_to_file(self):
+        df = pd.DataFrame(self.vacancies)
+        df.to_json(DATA_FILE, orient='records', indent=2, force_ascii=False)
 
-def load_data():
-    if os.path.exists(DATA_FILE):
+    def create_widgets(self):
+        # Верхняя панель
+        top_frame = ctk.CTkFrame(self.root)
+        top_frame.pack(fill="x", padx=10, pady=10)
+
+        # Статистика
+        stats_frame = ctk.CTkFrame(top_frame)
+        stats_frame.pack(side="left", padx=5)
+
+        self.total_label = ctk.CTkLabel(stats_frame, text="Всего: 0", font=("Arial", 14, "bold"))
+        self.total_label.pack(side="left", padx=10)
+        self.new_label = ctk.CTkLabel(stats_frame, text="Новых: 0", font=("Arial", 14, "bold"))
+        self.new_label.pack(side="left", padx=10)
+
+        # Кнопки
+        btn_frame = ctk.CTkFrame(top_frame)
+        btn_frame.pack(side="right", padx=5)
+
+        ctk.CTkButton(btn_frame, text="Загрузить", command=self.load_vacancies).pack(side="left", padx=5)
+        self.update_btn = ctk.CTkButton(btn_frame, text="Обновить", command=self.update_vacancies, state="disabled")
+        self.update_btn.pack(side="left", padx=5)
+        ctk.CTkButton(btn_frame, text="Выход", command=self.root.quit).pack(side="left", padx=5)
+
+        # Настройки
+        settings_frame = ctk.CTkFrame(self.root)
+        settings_frame.pack(fill="x", padx=10, pady=(0, 10))
+
+        ctk.CTkLabel(settings_frame, text="Ключевое слово:").grid(row=0, column=0, padx=5, pady=5, sticky="w")
+        self.query_entry = ctk.CTkEntry(settings_frame, width=250)
+        self.query_entry.grid(row=0, column=1, padx=5, pady=5)
+        self.query_entry.insert(0, self.settings['query'])
+
+        ctk.CTkLabel(settings_frame, text="Исключить (через запятую):").grid(row=0, column=2, padx=5, pady=5, sticky="w")
+        self.exclude_entry = ctk.CTkEntry(settings_frame, width=250)
+        self.exclude_entry.grid(row=0, column=3, padx=5, pady=5)
+        self.exclude_entry.insert(0, self.settings['exclude'])
+
+        ctk.CTkLabel(settings_frame, text="Период (дней):").grid(row=0, column=4, padx=5, pady=5, sticky="w")
+        self.days_entry = ctk.CTkEntry(settings_frame, width=60)
+        self.days_entry.grid(row=0, column=5, padx=5, pady=5)
+        self.days_entry.insert(0, str(self.settings['days']))
+
+        ctk.CTkButton(settings_frame, text="Сохранить настройки", command=self.save_app_settings).grid(row=0, column=6, padx=10, pady=5)
+
+        # Кнопки управления (появятся позже)
+        self.action_frame = ctk.CTkFrame(self.root)
+        self.action_frame.pack(fill="x", padx=10, pady=(0, 10))
+        self.action_frame.pack_forget()  # скрыто по умолчанию
+
+        self.select_all_btn = ctk.CTkButton(self.action_frame, text="Выбрать все новые", command=self.select_all_new)
+        self.select_all_btn.pack(side="left", padx=5)
+        self.mark_btn = ctk.CTkButton(self.action_frame, text="Пометить выбранные как просмотренные", command=self.mark_selected_as_old)
+        self.mark_btn.pack(side="left", padx=5)
+
+        # Таблица
+        table_frame = ctk.CTkFrame(self.root)
+        table_frame.pack(fill="both", expand=True, padx=10, pady=(0, 10))
+
+        # Scrollbar
+        tree_scroll = ttk.Scrollbar(table_frame)
+        tree_scroll.pack(side="right", fill="y")
+
+        # Treeview
+        self.tree = ttk.Treeview(
+            table_frame,
+            columns=("Status", "Title", "Company", "City", "Salary", "Date", "Link"),
+            show="headings",
+            yscrollcommand=tree_scroll.set
+        )
+        tree_scroll.config(command=self.tree.yview)
+
+        self.tree.heading("Status", text="Статус")
+        self.tree.heading("Title", text="Название")
+        self.tree.heading("Company", text="Компания")
+        self.tree.heading("City", text="Город")
+        self.tree.heading("Salary", text="Зарплата")
+        self.tree.heading("Date", text="Дата")
+        self.tree.heading("Link", text="Ссылка")
+
+        self.tree.column("Status", width=100, anchor="center")
+        self.tree.column("Title", width=300)
+        self.tree.column("Company", width=200)
+        self.tree.column("City", width=100)
+        self.tree.column("Salary", width=150)
+        self.tree.column("Date", width=100, anchor="center")
+        self.tree.column("Link", width=200)
+
+        self.tree.pack(fill="both", expand=True)
+        self.tree.bind("<Double-1>", self.on_link_click)
+
+    def save_app_settings(self):
+        query = self.query_entry.get().strip()
+        exclude = self.exclude_entry.get().strip()
         try:
-            df = pd.read_json(DATA_FILE, encoding='utf-8')
-            return df.to_dict('records')
-        except Exception:
-            return []
-    return []
-
-
-def save_data(data):
-    df = pd.DataFrame(data)
-    df.to_json(DATA_FILE, orient='records', indent=2, force_ascii=False)
-
-
-@app.route('/')
-def index():
-    return render_template('index.html')
-
-
-@app.route('/api/vacancies')
-def get_vacancies():
-    data = load_data()
-    return jsonify(data)
-
-
-@app.route('/api/settings', methods=['GET'])
-def get_settings():
-    return jsonify(load_settings())
-
-
-@app.route('/api/settings', methods=['POST'])
-def set_settings():
-    try:
-        data = request.json
-        query = data.get('query', '').strip()
-        exclude = data.get('exclude', '').strip()
-        days = int(data.get('days', 1))
-        if days < 1:
+            days = int(self.days_entry.get())
+            if days < 1: days = 1
+            if days > 30: days = 30
+        except:
             days = 1
-        if days > 30:
-            days = 30
+
         if not query:
-            return jsonify({'success': False, 'error': 'Ключевое слово не может быть пустым'}), 400
+            messagebox.showerror("Ошибка", "Укажите ключевое слово")
+            return
 
-        settings = {'query': query, 'exclude': exclude, 'days': days}
-        save_settings(settings)
-        return jsonify({'success': True})
-    except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 400
+        self.settings = {"query": query, "exclude": exclude, "days": days}
+        self.save_settings()
+        messagebox.showinfo("Успех", "Настройки сохранены!")
 
+    def update_table(self):
+        # Обновить статистику
+        new_count = sum(1 for v in self.vacancies if v['status'] == 'NEW')
+        self.total_label.configure(text=f"Всего: {len(self.vacancies)}")
+        self.new_label.configure(text=f"Новых: {new_count}")
 
-@app.route('/api/update')
-def update_vacancies():
-    try:
-        old_data = load_data()
-        old_links = {v['link'] for v in old_data if v.get('link')}
+        # Показать/скрыть кнопки
+        if new_count > 0:
+            self.action_frame.pack()
+        else:
+            self.action_frame.pack_forget()
 
-        new_vacancies = get_vacancies_from_api()
-        truly_new = [v for v in new_vacancies if v.get('link') and v['link'] not in old_links]
+        # Очистить таблицу
+        for item in self.tree.get_children():
+            self.tree.delete(item)
 
-        all_data = old_data + truly_new
+        # Сортировка: сначала NEW, потом по дате (новые выше)
+        def sort_key(v):
+            priority = 0 if v['status'] == 'NEW' else 1
+            date_val = v['date'] or '0000-00-00'
+            return (priority, date_val)
 
-        # Безопасная сортировка по дате
-        def get_sort_date(v):
-            d = v.get('date')
-            if isinstance(d, str) and len(d) >= 10:
-                return d[:10]
-            return '0000-00-00'
+        sorted_vacancies = sorted(self.vacancies, key=sort_key, reverse=False)
+        # Но дата должна быть в обратном порядке → инвертируем дату
+        sorted_vacancies.sort(key=lambda x: x['date'] or '0000-00-00', reverse=True)
+        sorted_vacancies.sort(key=lambda x: 0 if x['status'] == 'NEW' else 1)
 
-        # Сначала сортируем по дате (новые — выше)
-        all_data.sort(key=get_sort_date, reverse=True)
-        # Затем поднимаем NEW наверх
-        all_data.sort(key=lambda x: 0 if x.get('status') == 'NEW' else 1)
+        self.check_vars = []
+        for v in sorted_vacancies:
+            status_text = "Новая" if v['status'] == 'NEW' else "Просмотрена"
+            self.tree.insert("", "end", values=(
+                status_text,
+                v['title'],
+                v['company'],
+                v['city'],
+                v['salary'],
+                v['date'],
+                v['link']
+            ))
 
-        save_data(all_data)
+    def on_link_click(self, event):
+        item = self.tree.focus()
+        if item:
+            values = self.tree.item(item, "values")
+            link = values[6]
+            if link and link != "#":
+                webbrowser.open(link)
 
-        return jsonify({
-            'success': True,
-            'new_count': len(truly_new),
-            'total_count': len(all_data),
-            'data': all_data
-        })
-    except Exception as e:
-        print(f"Ошибка в update_vacancies: {e}")
-        return jsonify({'success': False, 'error': str(e)}), 500
+    def load_vacancies(self):
+        if not self.vacancies:
+            self.update_vacancies()
+        else:
+            self.update_table()
+            self.update_btn.configure(state="normal")
 
-@app.route('/api/mark-as-old', methods=['POST'])
-def mark_as_old():
-    try:
-        data = request.json
-        links_to_mark = set(data.get('links', []))
+    def update_vacancies(self):
+        def _update():
+            try:
+                old_links = {v['link'] for v in self.vacancies}
+                new_vac = self.get_vacancies_from_api()
+                truly_new = [v for v in new_vac if v['link'] not in old_links]
+                self.vacancies.extend(truly_new)
+                self.save_vacancies_to_file()
+                self.root.after(0, self.update_table)
+                self.root.after(0, lambda: self.update_btn.configure(state="normal"))
+                self.root.after(0, lambda: messagebox.showinfo("Успех", f"Найдено {len(truly_new)} новых вакансий"))
+            except Exception as e:
+                self.root.after(0, lambda: messagebox.showerror("Ошибка", str(e)))
 
-        current_data = load_data()
-        updated_count = 0
+        threading.Thread(target=_update, daemon=True).start()
 
-        for vacancy in current_data:
-            if vacancy['link'] in links_to_mark and vacancy['status'] == 'NEW':
-                vacancy['status'] = 'OLD'
-                updated_count += 1
+    def select_all_new(self):
+        # CustomTkinter не поддерживает чекбоксы в Treeview напрямую,
+        # поэтому реализуем через выделение строк
+        items = self.tree.get_children()
+        to_select = []
+        for item in items:
+            values = self.tree.item(item, "values")
+            if values[0] == "Новая":
+                to_select.append(item)
+        if to_select:
+            self.tree.selection_set(to_select)
 
-        save_data(current_data)
-        return jsonify({
-            'success': True,
-            'updated_count': updated_count,
-            'data': current_data
-        })
-    except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
+    def mark_selected_as_old(self):
+        selected = self.tree.selection()
+        if not selected:
+            messagebox.showwarning("Внимание", "Выберите вакансии для пометки")
+            return
 
+        updated = 0
+        for item in selected:
+            values = self.tree.item(item, "values")
+            if values[0] == "Новая":
+                # Найти вакансию по ссылке и обновить статус
+                link = values[6]
+                for v in self.vacancies:
+                    if v['link'] == link:
+                        v['status'] = 'OLD'
+                        updated += 1
+                        break
 
-@app.route('/api/exit', methods=['POST'])
-def exit_app():
-    # Корректное завершение Flask-приложения
-    os.kill(os.getpid(), signal.SIGINT)
-    return jsonify({'success': True})
+        if updated > 0:
+            self.save_vacancies_to_file()
+            self.update_table()
+            messagebox.showinfo("Успех", f"Помечено {updated} вакансий как просмотренные")
 
-
-def open_browser():
-    webbrowser.open('http://127.0.0.1:5000')
-
-
-if __name__ == '__main__':
-    Timer(1.5, open_browser).start()
-    try:
-        # use_reloader=False — чтобы не запускать двойной сервер в режиме отладки
-        app.run(debug=False, port=5000, use_reloader=False)
-    except KeyboardInterrupt:
-        print("\nПриложение завершено.")
-        sys.exit(0)
+# Запуск
+if __name__ == "__main__":
+    root = ctk.CTk()
+    app = VacancyApp(root)
+    root.mainloop()
