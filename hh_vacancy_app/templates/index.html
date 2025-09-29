@@ -45,11 +45,20 @@
         }
 
         .controls {
-            padding: 30px;
+            padding: 20px 30px;
             display: flex;
             justify-content: space-between;
             align-items: center;
             border-bottom: 2px solid #f0f0f0;
+            flex-wrap: wrap;
+            gap: 15px;
+        }
+
+        .controls-row {
+            display: flex;
+            gap: 15px;
+            align-items: center;
+            flex-wrap: wrap;
         }
 
         .stats {
@@ -74,13 +83,14 @@
         }
 
         .btn {
-            padding: 15px 40px;
-            font-size: 1.1em;
+            padding: 12px 24px;
+            font-size: 1em;
             border: none;
             border-radius: 8px;
             cursor: pointer;
             transition: all 0.3s;
             font-weight: 600;
+            white-space: nowrap;
         }
 
         .btn-primary {
@@ -90,7 +100,7 @@
 
         .btn-primary:hover {
             transform: translateY(-2px);
-            box-shadow: 0 10px 20px rgba(102, 126, 234, 0.4);
+            box-shadow: 0 8px 16px rgba(102, 126, 234, 0.4);
         }
 
         .btn-primary:disabled {
@@ -102,6 +112,53 @@
         .btn-success {
             background: #10b981;
             color: white;
+        }
+
+        .btn-danger {
+            background: #ef4444;
+            color: white;
+        }
+
+        .btn-danger:hover {
+            background: #dc2626;
+        }
+
+        .settings-section {
+            padding: 20px 30px;
+            background: #fafafa;
+            border-bottom: 2px solid #f0f0f0;
+        }
+
+        .settings-section h3 {
+            margin-bottom: 15px;
+            color: #333;
+        }
+
+        .settings-grid {
+            display: flex;
+            gap: 20px;
+            flex-wrap: wrap;
+            align-items: end;
+        }
+
+        .setting-group {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            min-width: 220px;
+        }
+
+        .setting-group label {
+            font-weight: 600;
+            font-size: 0.95em;
+            color: #444;
+        }
+
+        .setting-group input {
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            font-size: 1em;
         }
 
         .loading {
@@ -222,10 +279,11 @@
 <body>
     <div class="container">
         <div class="header">
-            <h1>🚀 Java Backend Вакансии</h1>
+            <h1>🚀 Вакансии</h1>
             <p>Удаленная работа • Россия и Беларусь</p>
         </div>
 
+        <!-- Основные кнопки и статистика -->
         <div class="controls">
             <div class="stats">
                 <div class="stat-item">
@@ -237,19 +295,50 @@
                     <div class="stat-label">Новых</div>
                 </div>
             </div>
-            <button class="btn btn-primary" id="loadBtn" onclick="loadVacancies()">
-                Загрузить вакансии
-            </button>
-            <button class="btn btn-success" id="updateBtn" onclick="updateVacancies()" style="display:none;">
-                Обновить
-            </button>
+            <div class="controls-row">
+                <button class="btn btn-primary" id="loadBtn" onclick="loadVacancies()">
+                    Загрузить вакансии
+                </button>
+                <button class="btn btn-success" id="updateBtn" onclick="updateVacancies()" style="display:none;">
+                    Обновить
+                </button>
+                <button class="btn btn-danger" onclick="exitApp()">
+                    Выход
+                </button>
+            </div>
         </div>
 
+        <!-- Настройки поиска -->
+        <div class="settings-section">
+            <h3>⚙️ Настройки поиска</h3>
+            <div class="settings-grid">
+                <div class="setting-group">
+                    <label>Ключевое слово:</label>
+                    <input type="text" id="searchQuery" placeholder="Например: Java разработчик">
+                </div>
+                <div class="setting-group">
+                    <label>Исключить (через запятую):</label>
+                    <input type="text" id="excludeWords" placeholder="Android, QA, Python...">
+                </div>
+                <div class="setting-group">
+                    <label>Период поиска (дней):</label>
+                    <input type="number" id="daysPeriod" min="1" max="30" value="1">
+                </div>
+                <div class="setting-group">
+                    <button class="btn btn-primary" onclick="saveSettings()" style="height: fit-content; padding: 10px 16px;">
+                        Сохранить настройки
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Сообщения -->
         <div id="message"></div>
 
+        <!-- Контент (таблица или пустое состояние) -->
         <div id="content">
             <div class="empty-state">
-                <h3>👆 Нажмите кнопку для загрузки вакансий</h3>
+                <h3>👆 Нажмите «Загрузить вакансии» или «Обновить»</h3>
                 <p>Здесь появится таблица с актуальными Java вакансиями</p>
             </div>
         </div>
@@ -257,6 +346,20 @@
 
     <script>
         let isFirstLoad = true;
+
+        // Загрузка настроек при старте
+        window.addEventListener('DOMContentLoaded', () => {
+            fetch('/api/settings')
+                .then(res => res.json())
+                .then(settings => {
+                    document.getElementById('searchQuery').value = settings.query || 'Java разработчик';
+                    document.getElementById('excludeWords').value = settings.exclude || 'Android, QA, Тестировщик, Аналитик, C#, архитектор, PHP, Fullstack, 1С, Python, Frontend-разработчик';
+                    document.getElementById('daysPeriod').value = settings.days || 1;
+                })
+                .catch(err => {
+                    console.warn('Не удалось загрузить настройки:', err);
+                });
+        });
 
         function showLoading() {
             document.getElementById('content').innerHTML = `
@@ -286,7 +389,7 @@
                 document.getElementById('content').innerHTML = `
                     <div class="empty-state">
                         <h3>Вакансии не найдены</h3>
-                        <p>Попробуйте обновить позже</p>
+                        <p>Попробуйте изменить настройки поиска и нажать «Обновить»</p>
                     </div>
                 `;
                 return;
@@ -313,9 +416,10 @@
 
             data.forEach(v => {
                 const statusClass = v.status === 'NEW' ? 'status-new' : 'status-old';
+                const statusText = v.status === 'NEW' ? 'Новая' : 'Старая';
                 html += `
                     <tr>
-                        <td><span class="status-badge ${statusClass}">${v.status}</span></td>
+                        <td><span class="status-badge ${statusClass}">${statusText}</span></td>
                         <td>${v.title || '-'}</td>
                         <td>${v.company || '-'}</td>
                         <td>${v.city || '-'}</td>
@@ -344,14 +448,17 @@
                 const response = await fetch('/api/vacancies');
                 const data = await response.json();
 
+                // Если первый запуск и данных нет — сразу обновляем
+                if (isFirstLoad && data.length === 0) {
+                    btn.disabled = false;
+                    await updateVacancies();
+                    return;
+                }
+
                 renderTable(data);
 
                 document.getElementById('loadBtn').style.display = 'none';
                 document.getElementById('updateBtn').style.display = 'block';
-
-                if (isFirstLoad && data.length === 0) {
-                    showMessage('Данных нет. Нажмите "Обновить" для загрузки вакансий', 'error');
-                }
                 isFirstLoad = false;
             } catch (error) {
                 showMessage('Ошибка загрузки данных: ' + error.message, 'error');
@@ -380,6 +487,52 @@
             } finally {
                 btn.disabled = false;
                 btn.textContent = 'Обновить';
+                // Убедимся, что кнопки в правильном состоянии
+                document.getElementById('loadBtn').style.display = 'none';
+                document.getElementById('updateBtn').style.display = 'block';
+            }
+        }
+
+        async function saveSettings() {
+            const query = document.getElementById('searchQuery').value.trim();
+            const exclude = document.getElementById('excludeWords').value.trim();
+            const days = parseInt(document.getElementById('daysPeriod').value) || 1;
+
+            if (!query) {
+                showMessage('Укажите ключевое слово для поиска', 'error');
+                return;
+            }
+
+            try {
+                const response = await fetch('/api/settings', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ query, exclude, days })
+                });
+                const result = await response.json();
+
+                if (result.success) {
+                    showMessage('✅ Настройки успешно сохранены!', 'success');
+                } else {
+                    showMessage('❌ Ошибка: ' + (result.error || 'Неизвестная ошибка'), 'error');
+                }
+            } catch (err) {
+                showMessage('❌ Ошибка сети при сохранении настроек', 'error');
+            }
+        }
+
+        async function exitApp() {
+            if (!confirm('Вы уверены, что хотите выйти из приложения?')) return;
+
+            try {
+                await fetch('/api/exit', { method: 'POST' });
+                showMessage('Приложение завершает работу...', 'success');
+                setTimeout(() => {
+                    window.close();
+                }, 1000);
+            } catch (err) {
+                alert('Сервер остановлен. Закройте вкладку вручную.');
+                window.close();
             }
         }
     </script>
