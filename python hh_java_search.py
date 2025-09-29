@@ -11,7 +11,7 @@ date_from = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%S")
 
 params = {
     "text": "Java разработчик NOT Android NOT QA NOT Тестировщик NOT Аналитик NOT C# NOT архитектор NOT PHP NOT Fullstack NOT 1С NOT Python NOT Frontend-разработчик",
-    "area": [113, 16],  # Россия
+    "area": [113, 16],  # Россия и Беларусь
     "schedule": "remote",  # удаленная работа
     "per_page": 50,
     "page": 0,
@@ -20,6 +20,10 @@ params = {
 }
 
 file_name = "java_backend_vacancies_last_week.xlsx"
+
+print("=" * 60)
+print("Начало работы скрипта")
+print("=" * 60)
 
 # Загружаем предыдущие данные (если файл есть)
 if os.path.exists(file_name):
@@ -33,7 +37,9 @@ else:
     old_links = set()
     print("Предыдущий отчёт не найден — создаём новый")
 
-print("Поиск вакансий для Java Developer...")
+print("\n" + "=" * 60)
+print("Поиск вакансий для Java Developer (Россия и Беларусь)...")
+print("=" * 60 + "\n")
 
 # Собираем текущие вакансии
 current_vacancies = []
@@ -41,6 +47,8 @@ current_vacancies = []
 while True:
     resp = requests.get(API_URL, params=params)
     data = resp.json()
+
+    print(f"Обработка страницы {params['page'] + 1}...")
 
     for item in data.get("items", []):
         link = item.get("alternate_url")
@@ -66,7 +74,9 @@ while True:
     else:
         break
 
+print(f"\n{'=' * 60}")
 print(f"Найдено {len(current_vacancies)} новых вакансий")
+print("=" * 60 + "\n")
 
 # Объединяем старые (OLD) и новые (NEW) данные
 if not old_df.empty:
@@ -94,6 +104,8 @@ if os.path.exists(file_name):
 
 new_df.to_excel(file_name, index=False)
 
+print("Подстройка ширины колонок...")
+
 # Автоматическая подстройка ширины колонок
 wb = load_workbook(file_name)
 ws = wb.active
@@ -114,4 +126,6 @@ for column in ws.columns:
 
 wb.save(file_name)
 
+print("\n" + "=" * 60)
 print(f"Отчёт обновлён: всего {len(new_df)} вакансий ({len(old_df)} OLD + {len(current_vacancies)} NEW)")
+print("=" * 60)
