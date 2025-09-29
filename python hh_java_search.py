@@ -23,16 +23,19 @@ file_name = "java_backend_vacancies_last_week.xlsx"
 # Загружаем предыдущие данные (если файл есть)
 if os.path.exists(file_name):
     old_df = pd.read_excel(file_name)
+    # Все предыдущие вакансии помечаем как OLD
+    old_df["Статус"] = "OLD"
     old_links = set(old_df["Ссылка"].tolist())
-    print(f"Найден предыдущий отчёт: {len(old_links)} вакансий")
+    print(f"Найден предыдущий отчёт: {len(old_links)} вакансий помечено как OLD")
 else:
+    old_df = pd.DataFrame()
     old_links = set()
     print("Предыдущий отчёт не найден — создаём новый")
 
-print("Поиск новых вакансий для Java Developer...")
+print("Поиск вакансий для Java Developer...")
 
-# Собираем только новые вакансии
-new_vacancies = []
+# Собираем текущие вакансии
+current_vacancies = []
 
 while True:
     resp = requests.get(API_URL, params=params)
@@ -41,7 +44,7 @@ while True:
     for item in data.get("items", []):
         link = item.get("alternate_url")
 
-        # Сохраняем только если вакансии не было в старом списке
+        # Определяем статус: NEW если вакансии не было, иначе пропускаем (она уже есть как OLD)
         if link not in old_links:
             vacancy = {
                 "Название": item.get("name"),
@@ -52,21 +55,31 @@ while True:
                     if item.get("salary") else "не указана"
                 ),
                 "Дата публикации": item.get("published_at", "")[:10],
-                "Ссылка": link
+                "Ссылка": link,
+                "Статус": "NEW"
             }
-            new_vacancies.append(vacancy)
+            current_vacancies.append(vacancy)
 
     if data.get("pages") and params["page"] < data["pages"] - 1:
         params["page"] += 1
     else:
         break
 
-print(f"\nНайдено {len(new_vacancies)} новых вакансий")
+print(f"Найдено {len(current_vacancies)} новых вакансий")
 
-# Сохраняем ТОЛЬКО новые вакансии (заменяя старый файл)
-if new_vacancies:
-    new_df = pd.DataFrame(new_vacancies)
-    new_df.to_excel(file_name, index=False)
-    print(f"Отчёт обновлён: сохранено {len(new_df)} новых вакансий")
+# Объединяем старые (OLD) и новые (NEW) данные
+if not old_df.empty:
+    new_df = pd.concat([old_df, pd.DataFrame(current_vacancies)], ignore_index=True)
 else:
-    print("Новых вакансий не найдено, файл не обновлён")
+    new_df = pd.DataFrame(current_vacancies)
+
+# Сохраняем обновлённый отчёт
+if os.path.exists(file_name):
+    try:
+        os.remove(file_name)
+    except PermissionError:
+        print(f"\nОШИБКА: Закройте файл {file_name} в Excel и запустите скрипт снова")
+        exit(1)
+
+new_df.to_excel(file_name, index=False)
+print(f"Отчёт обновлён: всего {len(new_df)} вакансий ({len(old_df)} OLD + {len(current_vacancies)} NEW)")
