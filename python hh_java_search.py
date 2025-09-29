@@ -11,7 +11,7 @@ date_from = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%S")
 
 params = {
     "text": "Java разработчик NOT Android NOT QA NOT Тестировщик NOT Аналитик NOT C# NOT архитектор NOT PHP NOT Fullstack NOT 1С NOT Python NOT Frontend-разработчик",
-    "area": 113,  # Россия
+    "area": [113, 16],  # Россия
     "schedule": "remote",  # удаленная работа
     "per_page": 50,
     "page": 0,
