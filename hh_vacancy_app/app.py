@@ -210,7 +210,7 @@ class UpdateWorker(QThread):
 class VacancyApp(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Java Backend Вакансии — HH.ru")
+        self.setWindowTitle("Удобные Вакансии — HH.ru")
         self.resize(1500, 900)
         self.vacancies = []
         self.worker = None
@@ -284,7 +284,7 @@ class VacancyApp(QMainWindow):
                     color: #000000;
                     border: none;
                     border-radius: 8px;
-                    padding: 12px 24px;
+                    padding: 10px 20px;
                     font-weight: bold;
                     font-size: 13px;
                 }
@@ -300,14 +300,14 @@ class VacancyApp(QMainWindow):
                 }
                 QLabel {
                     color: #E1E1E1;
-                    font-size: 14px;
+                    font-size: 13px;
                 }
                 QLineEdit, QSpinBox {
                     background-color: #2D2D2D;
                     color: #E1E1E1;
                     border: 2px solid #3D3D3D;
                     border-radius: 8px;
-                    padding: 8px;
+                    padding: 6px 12px;
                     font-size: 13px;
                 }
                 QLineEdit:focus, QSpinBox:focus {
@@ -331,7 +331,7 @@ class VacancyApp(QMainWindow):
                 QHeaderView::section {
                     background-color: #2D2D2D;
                     color: #E1E1E1;
-                    padding: 12px;
+                    padding: 12px 8px;
                     border: none;
                     font-weight: bold;
                     font-size: 13px;
@@ -339,6 +339,8 @@ class VacancyApp(QMainWindow):
                 QCheckBox {
                     color: #E1E1E1;
                     spacing: 8px;
+                    padding: 4px;
+                    font-size: 13px;
                 }
                 QCheckBox::indicator {
                     width: 20px;
@@ -365,7 +367,6 @@ class VacancyApp(QMainWindow):
                     background-color: #1E1E1E;
                     border-radius: 12px;
                     border: 2px solid #2D2D2D;
-                    padding: 16px;
                 }
                 QGroupBox {
                     color: #E1E1E1;
@@ -409,7 +410,7 @@ class VacancyApp(QMainWindow):
                     color: #FFFFFF;
                     border: none;
                     border-radius: 8px;
-                    padding: 12px 24px;
+                    padding: 10px 20px;
                     font-weight: bold;
                     font-size: 13px;
                 }
@@ -425,14 +426,14 @@ class VacancyApp(QMainWindow):
                 }
                 QLabel {
                     color: #212121;
-                    font-size: 14px;
+                    font-size: 13px;
                 }
                 QLineEdit, QSpinBox {
                     background-color: #FFFFFF;
                     color: #212121;
                     border: 2px solid #E0E0E0;
                     border-radius: 8px;
-                    padding: 8px;
+                    padding: 6px 12px;
                     font-size: 13px;
                 }
                 QLineEdit:focus, QSpinBox:focus {
@@ -456,7 +457,7 @@ class VacancyApp(QMainWindow):
                 QHeaderView::section {
                     background-color: #FAFAFA;
                     color: #212121;
-                    padding: 12px;
+                    padding: 12px 8px;
                     border: none;
                     border-bottom: 2px solid #E0E0E0;
                     font-weight: bold;
@@ -465,6 +466,8 @@ class VacancyApp(QMainWindow):
                 QCheckBox {
                     color: #212121;
                     spacing: 8px;
+                    padding: 4px;
+                    font-size: 13px;
                 }
                 QCheckBox::indicator {
                     width: 20px;
@@ -491,7 +494,6 @@ class VacancyApp(QMainWindow):
                     background-color: #FFFFFF;
                     border-radius: 12px;
                     border: none;
-                    padding: 16px;
                 }
                 QGroupBox {
                     color: #212121;
@@ -512,7 +514,7 @@ class VacancyApp(QMainWindow):
         current = self.settings.get("theme", "light")
         self.settings["theme"] = "dark" if current == "light" else "light"
         self.save_settings()
-        self.theme_btn.setText(f"🌙 Темная" if self.settings["theme"] == "light" else "☀️ Светлая")
+        self.theme_btn.setText("Темная" if self.settings["theme"] == "light" else "Светлая")
         self.apply_theme()
         self.update_table()
 
@@ -524,67 +526,34 @@ class VacancyApp(QMainWindow):
         main_layout.setSpacing(0)
         main_layout.setContentsMargins(0, 0, 0, 0)
 
-        # Шапка с градиентом
+        # Компактная шапка
         header = QFrame()
         header.setObjectName("header")
-        header.setFixedHeight(120)
-        header_layout = QVBoxLayout(header)
-        header_layout.setContentsMargins(30, 20, 30, 20)
+        header.setFixedHeight(80)
+        header_layout = QHBoxLayout(header)
+        header_layout.setContentsMargins(20, 15, 20, 15)
 
-        title = QLabel("☕ Java Backend Вакансии")
-        title.setStyleSheet("color: white; font-size: 28px; font-weight: bold;")
+        # Заголовок слева
+        title_layout = QVBoxLayout()
+        title = QLabel("Удобные Вакансии")
+        title.setStyleSheet("color: white; font-size: 22px; font-weight: bold;")
         subtitle = QLabel("Удаленная работа • Россия и Беларусь")
-        subtitle.setStyleSheet("color: rgba(255, 255, 255, 0.8); font-size: 14px;")
+        subtitle.setStyleSheet("color: rgba(255, 255, 255, 0.8); font-size: 12px;")
+        title_layout.addWidget(title)
+        title_layout.addWidget(subtitle)
 
-        header_layout.addWidget(title)
-        header_layout.addWidget(subtitle)
-        main_layout.addWidget(header)
+        header_layout.addLayout(title_layout)
+        header_layout.addStretch()
 
-        # Контент с отступами
-        content_widget = QWidget()
-        content_layout = QVBoxLayout(content_widget)
-        content_layout.setContentsMargins(20, 20, 20, 20)
-        content_layout.setSpacing(16)
-
-        # Статистика (карточка)
-        stats_card = QFrame()
-        stats_card.setObjectName("statsCard")
-        stats_layout = QHBoxLayout(stats_card)
-        stats_layout.setContentsMargins(24, 16, 24, 16)
-
-        # Всего вакансий
-        total_container = QVBoxLayout()
-        self.total_label = QLabel("0")
-        self.total_label.setStyleSheet("font-size: 32px; font-weight: bold; color: #6200EE;" if self.settings.get(
-            "theme") == "light" else "font-size: 32px; font-weight: bold; color: #BB86FC;")
-        total_text = QLabel("Всего вакансий")
-        total_text.setStyleSheet("font-size: 12px; opacity: 0.7;")
-        total_container.addWidget(self.total_label)
-        total_container.addWidget(total_text)
-
-        # Новых
-        new_container = QVBoxLayout()
-        self.new_label = QLabel("0")
-        self.new_label.setStyleSheet("font-size: 32px; font-weight: bold; color: #00C853;")
-        new_text = QLabel("Новых")
-        new_text.setStyleSheet("font-size: 12px; opacity: 0.7;")
-        new_container.addWidget(self.new_label)
-        new_container.addWidget(new_text)
-
-        stats_layout.addLayout(total_container)
-        stats_layout.addSpacing(40)
-        stats_layout.addLayout(new_container)
-        stats_layout.addStretch()
-
-        # Кнопки управления
+        # Кнопки управления в шапке
         buttons_layout = QHBoxLayout()
-        self.update_btn = QPushButton("🔄 Обновить")
-        self.theme_btn = QPushButton(f"🌙 Темная" if self.settings.get("theme") == "light" else "☀️ Светлая")
-        self.exit_btn = QPushButton("❌ Выход")
+        self.update_btn = QPushButton("Обновить")
+        self.theme_btn = QPushButton("Темная" if self.settings.get("theme") == "light" else "Светлая")
+        self.exit_btn = QPushButton("Выход")
 
-        self.update_btn.setFixedHeight(45)
-        self.theme_btn.setFixedHeight(45)
-        self.exit_btn.setFixedHeight(45)
+        self.update_btn.setFixedSize(110, 40)
+        self.theme_btn.setFixedSize(110, 40)
+        self.exit_btn.setFixedSize(110, 40)
 
         self.update_btn.clicked.connect(self.update_vacancies)
         self.exit_btn.clicked.connect(self.close)
@@ -593,126 +562,196 @@ class VacancyApp(QMainWindow):
         buttons_layout.addWidget(self.update_btn)
         buttons_layout.addWidget(self.theme_btn)
         buttons_layout.addWidget(self.exit_btn)
-        stats_layout.addLayout(buttons_layout)
+        header_layout.addLayout(buttons_layout)
 
-        content_layout.addWidget(stats_card)
+        main_layout.addWidget(header)
 
-        # Настройки поиска (карточка)
+        # Контент с минимальными отступами
+        content_widget = QWidget()
+        content_layout = QVBoxLayout(content_widget)
+        content_layout.setContentsMargins(15, 12, 15, 12)
+        content_layout.setSpacing(12)
+
+        # Компактная статистика и настройки в одной строке
+        top_row = QHBoxLayout()
+        top_row.setSpacing(12)
+
+        # Статистика (компактная карточка)
+        stats_card = QFrame()
+        stats_card.setObjectName("statsCard")
+        stats_card.setFixedHeight(85)
+        stats_layout = QHBoxLayout(stats_card)
+        stats_layout.setContentsMargins(20, 12, 20, 12)
+
+        # Всего
+        total_layout = QVBoxLayout()
+        total_layout.setSpacing(3)
+        self.total_label = QLabel("0")
+        self.total_label.setStyleSheet("font-size: 28px; font-weight: bold; color: #6200EE;" if self.settings.get(
+            "theme") == "light" else "font-size: 28px; font-weight: bold; color: #BB86FC;")
+        total_text = QLabel("Всего")
+        total_text.setStyleSheet("font-size: 11px; opacity: 0.7;")
+        total_layout.addWidget(self.total_label)
+        total_layout.addWidget(total_text)
+
+        # Новых
+        new_layout = QVBoxLayout()
+        new_layout.setSpacing(3)
+        self.new_label = QLabel("0")
+        self.new_label.setStyleSheet("font-size: 28px; font-weight: bold; color: #00C853;")
+        new_text = QLabel("Новых")
+        new_text.setStyleSheet("font-size: 11px; opacity: 0.7;")
+        new_layout.addWidget(self.new_label)
+        new_layout.addWidget(new_text)
+
+        stats_layout.addLayout(total_layout)
+        stats_layout.addSpacing(30)
+        stats_layout.addLayout(new_layout)
+        stats_layout.addStretch()
+
+        top_row.addWidget(stats_card, 1)
+
+        # Настройки поиска (компактная карточка)
         settings_card = QFrame()
         settings_card.setObjectName("settingsCard")
-        settings_layout = QVBoxLayout(settings_card)
-        settings_layout.setContentsMargins(24, 16, 24, 16)
-        settings_layout.setSpacing(12)
+        settings_card.setFixedHeight(85)
+        settings_layout = QHBoxLayout(settings_card)
+        settings_layout.setContentsMargins(15, 12, 15, 12)
+        settings_layout.setSpacing(10)
 
-        # Заголовок настроек
-        settings_title = QLabel("⚙️ Настройки поиска")
-        settings_title.setStyleSheet("font-size: 16px; font-weight: bold;")
-        settings_layout.addWidget(settings_title)
-
-        # Строка 1
-        row1 = QHBoxLayout()
-        row1.addWidget(QLabel("Ключевое слово:"))
+        # Компактные поля
+        settings_layout.addWidget(QLabel("Слово:"))
         self.query_input = QLineEdit()
         self.query_input.setText(self.settings.get("query", ""))
-        self.query_input.setPlaceholderText("Например: Python разработчик")
-        row1.addWidget(self.query_input, 1)
-        settings_layout.addLayout(row1)
+        self.query_input.setFixedWidth(200)
+        self.query_input.setMinimumHeight(36)
+        settings_layout.addWidget(self.query_input)
 
-        # Строка 2
-        row2 = QHBoxLayout()
-        row2.addWidget(QLabel("Исключить:"))
-        self.exclude_input = QLineEdit()
-        self.exclude_input.setText(self.settings.get("exclude", ""))
-        self.exclude_input.setPlaceholderText("Через запятую: Android, QA")
-        row2.addWidget(self.exclude_input, 1)
-
-        row2.addWidget(QLabel("Период (дней):"))
+        settings_layout.addWidget(QLabel("Период:"))
         self.days_input = QSpinBox()
         self.days_input.setRange(1, 30)
         self.days_input.setValue(self.settings.get("days", 1))
-        self.days_input.setFixedWidth(80)
-        row2.addWidget(self.days_input)
-        settings_layout.addLayout(row2)
+        self.days_input.setFixedWidth(70)
+        self.days_input.setMinimumHeight(32)
+        settings_layout.addWidget(self.days_input)
 
-        # Строка 3: Тип работы и страны
-        row3 = QHBoxLayout()
+        # Разделитель
+        separator1 = QFrame()
+        separator1.setFrameShape(QFrame.VLine)
+        separator1.setFrameShadow(QFrame.Sunken)
+        settings_layout.addWidget(separator1)
 
-        # Группа: Тип работы
-        work_type_group = QGroupBox("💼 Тип работы")
-        work_type_layout = QHBoxLayout()
-
-        self.remote_checkbox = QCheckBox("Удаленная")
+        # Тип работы (компактно)
+        self.remote_checkbox = QCheckBox("Удаленка")
         self.remote_checkbox.setChecked(self.settings.get('work_types', {}).get('remote', True))
+        self.remote_checkbox.setMinimumHeight(25)
 
         self.hybrid_checkbox = QCheckBox("Гибрид")
         self.hybrid_checkbox.setChecked(self.settings.get('work_types', {}).get('hybrid', False))
+        self.hybrid_checkbox.setMinimumHeight(25)
 
         self.office_checkbox = QCheckBox("Офис")
         self.office_checkbox.setChecked(self.settings.get('work_types', {}).get('office', False))
+        self.office_checkbox.setMinimumHeight(25)
 
-        work_type_layout.addWidget(self.remote_checkbox)
-        work_type_layout.addWidget(self.hybrid_checkbox)
-        work_type_layout.addWidget(self.office_checkbox)
-        work_type_layout.addStretch()
-        work_type_group.setLayout(work_type_layout)
+        settings_layout.addWidget(self.remote_checkbox)
+        settings_layout.addWidget(self.hybrid_checkbox)
+        settings_layout.addWidget(self.office_checkbox)
 
-        # Группа: Страны
-        country_group = QGroupBox("🌍 Страны")
-        country_layout = QHBoxLayout()
+        # Разделитель
+        separator2 = QFrame()
+        separator2.setFrameShape(QFrame.VLine)
+        separator2.setFrameShadow(QFrame.Sunken)
+        settings_layout.addWidget(separator2)
 
-        self.russia_checkbox = QCheckBox("Россия")
+        # Страны (компактно)
+        self.russia_checkbox = QCheckBox("RU")
         self.russia_checkbox.setChecked(self.settings.get('countries', {}).get('russia', True))
+        self.russia_checkbox.setMinimumHeight(25)
 
-        self.belarus_checkbox = QCheckBox("Беларусь")
+        self.belarus_checkbox = QCheckBox("BY")
         self.belarus_checkbox.setChecked(self.settings.get('countries', {}).get('belarus', True))
+        self.belarus_checkbox.setMinimumHeight(25)
 
-        country_layout.addWidget(self.russia_checkbox)
-        country_layout.addWidget(self.belarus_checkbox)
-        country_layout.addStretch()
-        country_group.setLayout(country_layout)
+        settings_layout.addWidget(self.russia_checkbox)
+        settings_layout.addWidget(self.belarus_checkbox)
 
-        row3.addWidget(work_type_group)
-        row3.addWidget(country_group)
-        settings_layout.addLayout(row3)
+        settings_layout.addStretch()
 
-        # Кнопка сохранения настроек
-        save_row = QHBoxLayout()
-        save_row.addStretch()
-        self.save_settings_btn = QPushButton("💾 Сохранить настройки")
-        self.save_settings_btn.setFixedHeight(40)
+        # Кнопка сохранения
+        self.save_settings_btn = QPushButton("Сохранить")
+        self.save_settings_btn.setFixedSize(110, 38)
         self.save_settings_btn.clicked.connect(self.save_app_settings)
-        save_row.addWidget(self.save_settings_btn)
-        settings_layout.addLayout(save_row)
+        settings_layout.addWidget(self.save_settings_btn)
 
-        content_layout.addWidget(settings_card)
+        top_row.addWidget(settings_card, 2)
+        content_layout.addLayout(top_row)
+
+        # Строка с полем исключения
+        exclude_row = QHBoxLayout()
+        exclude_label = QLabel("Исключить:")
+        exclude_label.setFixedWidth(70)
+        exclude_row.addWidget(exclude_label)
+
+        self.exclude_input = QLineEdit()
+        self.exclude_input.setText(self.settings.get("exclude", ""))
+        self.exclude_input.setPlaceholderText("Через запятую: Android, QA, Тестировщик...")
+        self.exclude_input.setMinimumHeight(35)
+        exclude_row.addWidget(self.exclude_input)
+        content_layout.addLayout(exclude_row)
 
         # Кнопки действий с вакансиями
         self.action_widget = QWidget()
+        self.action_widget.setFixedHeight(45)
         action_layout = QHBoxLayout(self.action_widget)
         action_layout.setContentsMargins(0, 0, 0, 0)
-        self.select_all_btn = QPushButton("✅ Выбрать все новые")
-        self.mark_btn = QPushButton("👁️ Пометить как просмотренные")
-        self.select_all_btn.setFixedHeight(40)
-        self.mark_btn.setFixedHeight(40)
+
+        self.select_all_btn = QPushButton("Выбрать все")
+        self.mark_btn = QPushButton("Пометить просмотренными")
+        self.select_all_btn.setFixedHeight(36)
+        self.mark_btn.setFixedHeight(36)
         self.select_all_btn.clicked.connect(self.select_all_new)
         self.mark_btn.clicked.connect(self.mark_selected_as_old)
+
         action_layout.addWidget(self.select_all_btn)
         action_layout.addWidget(self.mark_btn)
         action_layout.addStretch()
         self.action_widget.hide()
         content_layout.addWidget(self.action_widget)
 
-        # Таблица
+        # Таблица (занимает все оставшееся место)
         self.table = QTableWidget()
-        self.table.setColumnCount(9)  # Добавлен столбец для типа работы
+        self.table.setColumnCount(9)
         self.table.setHorizontalHeaderLabels(
             ["", "Статус", "Название", "Компания", "Город", "Тип работы", "Зарплата", "Дата", "Действие"])
-        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
-        self.table.horizontalHeader().setStretchLastSection(True)
+
+        # Оптимизация размеров колонок
+        header = self.table.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.Fixed)
+        header.resizeSection(0, 45)
+        header.setSectionResizeMode(1, QHeaderView.Fixed)
+        header.resizeSection(1, 120)
+        header.setSectionResizeMode(2, QHeaderView.Stretch)
+        header.setSectionResizeMode(3, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(4, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(5, QHeaderView.Fixed)
+        header.resizeSection(5, 110)
+        header.setSectionResizeMode(6, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(7, QHeaderView.Fixed)
+        header.resizeSection(7, 90)
+        header.setSectionResizeMode(8, QHeaderView.Fixed)
+        header.resizeSection(8, 90)
+
+        # Высота строк
+        self.table.verticalHeader().setDefaultSectionSize(40)
+        self.table.verticalHeader().setVisible(False)
+
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.table.setEditTriggers(QTableWidget.NoEditTriggers)
         self.table.setAlternatingRowColors(True)
         self.table.cellClicked.connect(self.on_cell_click)
+        self.table.setShowGrid(False)
+
         content_layout.addWidget(self.table)
 
         main_layout.addWidget(content_widget)
