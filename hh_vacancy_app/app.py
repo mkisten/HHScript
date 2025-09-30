@@ -10,10 +10,11 @@ import requests
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QLabel, QLineEdit, QTableWidget, QTableWidgetItem,
-    QHeaderView, QMessageBox, QAbstractItemView, QCheckBox, QSpinBox
+    QHeaderView, QMessageBox, QAbstractItemView, QCheckBox, QSpinBox,
+    QFrame
 )
 from PySide6.QtCore import Qt, Signal, QObject, QThread
-from PySide6.QtGui import QDesktopServices, QColor, QPalette
+from PySide6.QtGui import QDesktopServices, QColor, QPalette, QFont
 
 # Настройка логирования
 logging.basicConfig(
@@ -39,8 +40,8 @@ DEFAULT_SETTINGS = {
 
 # Worker для фонового обновления
 class UpdateWorker(QThread):
-    finished = Signal(list)  # Сигнал с новыми вакансиями
-    error = Signal(str)  # Сигнал с ошибкой
+    finished = Signal(list)
+    error = Signal(str)
 
     def __init__(self, settings):
         super().__init__()
@@ -50,7 +51,6 @@ class UpdateWorker(QThread):
         try:
             logger.info("Фоновый поток: начало получения вакансий")
 
-            # Загружаем текущие вакансии из файла
             current_vacancies = []
             if os.path.exists(DATA_FILE):
                 try:
@@ -62,20 +62,17 @@ class UpdateWorker(QThread):
 
             old_links = {v['link'] for v in current_vacancies}
 
-            # Получаем новые вакансии с API
             new_vacancies = self.get_vacancies_from_api()
             truly_new = [v for v in new_vacancies if v['link'] not in old_links]
 
             logger.info(f"Найдено {len(truly_new)} новых вакансий")
 
-            # Сохраняем обновленный список
             if truly_new:
                 all_vacancies = current_vacancies + truly_new
                 with open(DATA_FILE, 'w', encoding='utf-8') as f:
                     json.dump(all_vacancies, f, ensure_ascii=False, indent=2)
                 logger.info("Вакансии сохранены в файл")
 
-            # Отправляем сигнал с результатом
             self.finished.emit(truly_new)
 
         except Exception as e:
@@ -85,7 +82,6 @@ class UpdateWorker(QThread):
     def get_vacancies_from_api(self):
         date_from = (datetime.now() - timedelta(days=int(self.settings['days']))).strftime("%Y-%m-%dT%H:%M:%S")
 
-        # Формируем поисковый запрос
         exclude_list = [w.strip() for w in self.settings['exclude'].split(',') if w.strip()]
         exclude_str = " NOT ".join(exclude_list)
         search_text = f"{self.settings['query']} NOT {exclude_str}" if exclude_str else self.settings['query']
@@ -168,8 +164,8 @@ class VacancyApp(QMainWindow):
         self.worker = None
         logger.info("Запуск приложения")
         self.load_settings()
-        self.apply_theme()
         self.init_ui()
+        self.apply_theme()
         self.load_vacancies_from_file()
         self.update_table()
 
@@ -198,33 +194,240 @@ class VacancyApp(QMainWindow):
 
     def apply_theme(self):
         app = QApplication.instance()
+        app.setStyle("Fusion")
+
         if self.settings.get("theme") == "dark":
-            app.setStyle("Fusion")
+            # Material Dark Theme
             palette = QPalette()
-            palette.setColor(QPalette.Window, QColor(53, 53, 53))
-            palette.setColor(QPalette.WindowText, Qt.white)
-            palette.setColor(QPalette.Base, QColor(25, 25, 25))
-            palette.setColor(QPalette.AlternateBase, QColor(53, 53, 53))
-            palette.setColor(QPalette.ToolTipBase, Qt.white)
-            palette.setColor(QPalette.ToolTipText, Qt.white)
-            palette.setColor(QPalette.Text, Qt.white)
-            palette.setColor(QPalette.Button, QColor(53, 53, 53))
-            palette.setColor(QPalette.ButtonText, Qt.white)
-            palette.setColor(QPalette.BrightText, Qt.red)
-            palette.setColor(QPalette.Link, QColor(42, 130, 218))
-            palette.setColor(QPalette.Highlight, QColor(42, 130, 218))
-            palette.setColor(QPalette.HighlightedText, Qt.black)
+            palette.setColor(QPalette.Window, QColor("#121212"))
+            palette.setColor(QPalette.WindowText, QColor("#E1E1E1"))
+            palette.setColor(QPalette.Base, QColor("#1E1E1E"))
+            palette.setColor(QPalette.AlternateBase, QColor("#2D2D2D"))
+            palette.setColor(QPalette.ToolTipBase, QColor("#2D2D2D"))
+            palette.setColor(QPalette.ToolTipText, QColor("#E1E1E1"))
+            palette.setColor(QPalette.Text, QColor("#E1E1E1"))
+            palette.setColor(QPalette.Button, QColor("#2D2D2D"))
+            palette.setColor(QPalette.ButtonText, QColor("#E1E1E1"))
+            palette.setColor(QPalette.BrightText, QColor("#FF5252"))
+            palette.setColor(QPalette.Link, QColor("#BB86FC"))
+            palette.setColor(QPalette.Highlight, QColor("#BB86FC"))
+            palette.setColor(QPalette.HighlightedText, QColor("#000000"))
             app.setPalette(palette)
+
+            # Стили для темной темы
+            self.setStyleSheet("""
+                QMainWindow {
+                    background-color: #121212;
+                }
+                QPushButton {
+                    background-color: #BB86FC;
+                    color: #000000;
+                    border: none;
+                    border-radius: 8px;
+                    padding: 12px 24px;
+                    font-weight: bold;
+                    font-size: 13px;
+                }
+                QPushButton:hover {
+                    background-color: #D7B5FF;
+                }
+                QPushButton:pressed {
+                    background-color: #9965E0;
+                }
+                QPushButton:disabled {
+                    background-color: #3D3D3D;
+                    color: #6D6D6D;
+                }
+                QLabel {
+                    color: #E1E1E1;
+                    font-size: 14px;
+                }
+                QLineEdit, QSpinBox {
+                    background-color: #2D2D2D;
+                    color: #E1E1E1;
+                    border: 2px solid #3D3D3D;
+                    border-radius: 8px;
+                    padding: 8px;
+                    font-size: 13px;
+                }
+                QLineEdit:focus, QSpinBox:focus {
+                    border: 2px solid #BB86FC;
+                }
+                QTableWidget {
+                    background-color: #1E1E1E;
+                    alternate-background-color: #252525;
+                    color: #E1E1E1;
+                    gridline-color: #3D3D3D;
+                    border: none;
+                    border-radius: 12px;
+                }
+                QTableWidget::item {
+                    padding: 8px;
+                }
+                QTableWidget::item:selected {
+                    background-color: #BB86FC;
+                    color: #000000;
+                }
+                QHeaderView::section {
+                    background-color: #2D2D2D;
+                    color: #E1E1E1;
+                    padding: 12px;
+                    border: none;
+                    font-weight: bold;
+                    font-size: 13px;
+                }
+                QCheckBox {
+                    color: #E1E1E1;
+                    spacing: 8px;
+                }
+                QCheckBox::indicator {
+                    width: 20px;
+                    height: 20px;
+                    border-radius: 4px;
+                    border: 2px solid #BB86FC;
+                    background-color: #2D2D2D;
+                }
+                QCheckBox::indicator:checked {
+                    background-color: #BB86FC;
+                    border: 2px solid #BB86FC;
+                }
+                QFrame#header {
+                    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                                                stop:0 #6A1B9A, stop:1 #8E24AA);
+                    border-radius: 0px;
+                }
+                QFrame#statsCard {
+                    background-color: #1E1E1E;
+                    border-radius: 12px;
+                    border: 2px solid #2D2D2D;
+                }
+                QFrame#settingsCard {
+                    background-color: #1E1E1E;
+                    border-radius: 12px;
+                    border: 2px solid #2D2D2D;
+                    padding: 16px;
+                }
+            """)
         else:
-            app.setStyle("Fusion")
-            app.setPalette(app.style().standardPalette())
+            # Material Light Theme
+            palette = QPalette()
+            palette.setColor(QPalette.Window, QColor("#F5F5F5"))
+            palette.setColor(QPalette.WindowText, QColor("#212121"))
+            palette.setColor(QPalette.Base, QColor("#FFFFFF"))
+            palette.setColor(QPalette.AlternateBase, QColor("#FAFAFA"))
+            palette.setColor(QPalette.ToolTipBase, QColor("#FFFFFF"))
+            palette.setColor(QPalette.ToolTipText, QColor("#212121"))
+            palette.setColor(QPalette.Text, QColor("#212121"))
+            palette.setColor(QPalette.Button, QColor("#FFFFFF"))
+            palette.setColor(QPalette.ButtonText, QColor("#212121"))
+            palette.setColor(QPalette.BrightText, QColor("#FF5252"))
+            palette.setColor(QPalette.Link, QColor("#6200EE"))
+            palette.setColor(QPalette.Highlight, QColor("#6200EE"))
+            palette.setColor(QPalette.HighlightedText, QColor("#FFFFFF"))
+            app.setPalette(palette)
+
+            # Стили для светлой темы
+            self.setStyleSheet("""
+                QMainWindow {
+                    background-color: #F5F5F5;
+                }
+                QPushButton {
+                    background-color: #6200EE;
+                    color: #FFFFFF;
+                    border: none;
+                    border-radius: 8px;
+                    padding: 12px 24px;
+                    font-weight: bold;
+                    font-size: 13px;
+                }
+                QPushButton:hover {
+                    background-color: #7C4DFF;
+                }
+                QPushButton:pressed {
+                    background-color: #5600D6;
+                }
+                QPushButton:disabled {
+                    background-color: #E0E0E0;
+                    color: #9E9E9E;
+                }
+                QLabel {
+                    color: #212121;
+                    font-size: 14px;
+                }
+                QLineEdit, QSpinBox {
+                    background-color: #FFFFFF;
+                    color: #212121;
+                    border: 2px solid #E0E0E0;
+                    border-radius: 8px;
+                    padding: 8px;
+                    font-size: 13px;
+                }
+                QLineEdit:focus, QSpinBox:focus {
+                    border: 2px solid #6200EE;
+                }
+                QTableWidget {
+                    background-color: #FFFFFF;
+                    alternate-background-color: #FAFAFA;
+                    color: #212121;
+                    gridline-color: #E0E0E0;
+                    border: none;
+                    border-radius: 12px;
+                }
+                QTableWidget::item {
+                    padding: 8px;
+                }
+                QTableWidget::item:selected {
+                    background-color: #6200EE;
+                    color: #FFFFFF;
+                }
+                QHeaderView::section {
+                    background-color: #FAFAFA;
+                    color: #212121;
+                    padding: 12px;
+                    border: none;
+                    border-bottom: 2px solid #E0E0E0;
+                    font-weight: bold;
+                    font-size: 13px;
+                }
+                QCheckBox {
+                    color: #212121;
+                    spacing: 8px;
+                }
+                QCheckBox::indicator {
+                    width: 20px;
+                    height: 20px;
+                    border-radius: 4px;
+                    border: 2px solid #6200EE;
+                    background-color: #FFFFFF;
+                }
+                QCheckBox::indicator:checked {
+                    background-color: #6200EE;
+                    border: 2px solid #6200EE;
+                }
+                QFrame#header {
+                    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                                                stop:0 #6200EE, stop:1 #9D46FF);
+                    border-radius: 0px;
+                }
+                QFrame#statsCard {
+                    background-color: #FFFFFF;
+                    border-radius: 12px;
+                    border: none;
+                }
+                QFrame#settingsCard {
+                    background-color: #FFFFFF;
+                    border-radius: 12px;
+                    border: none;
+                    padding: 16px;
+                }
+            """)
 
     def toggle_theme(self):
         current = self.settings.get("theme", "light")
         self.settings["theme"] = "dark" if current == "light" else "light"
         self.save_settings()
+        self.theme_btn.setText(f"🌙 Темная" if self.settings["theme"] == "light" else "☀️ Светлая")
         self.apply_theme()
-        self.theme_btn.setText(f"Тема: {self.settings['theme'].capitalize()}")
         self.update_table()
 
     def init_ui(self):
@@ -232,64 +435,141 @@ class VacancyApp(QMainWindow):
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
         main_layout = QVBoxLayout(central_widget)
+        main_layout.setSpacing(0)
+        main_layout.setContentsMargins(0, 0, 0, 0)
 
-        # Верхняя панель
-        top_layout = QHBoxLayout()
-        self.total_label = QLabel("Всего: 0")
-        self.new_label = QLabel("Новых: 0")
-        top_layout.addWidget(self.total_label)
-        top_layout.addWidget(self.new_label)
-        top_layout.addStretch()
+        # Шапка с градиентом
+        header = QFrame()
+        header.setObjectName("header")
+        header.setFixedHeight(120)
+        header_layout = QVBoxLayout(header)
+        header_layout.setContentsMargins(30, 20, 30, 20)
 
-        self.update_btn = QPushButton("Обновить")
-        self.exit_btn = QPushButton("Выход")
-        self.theme_btn = QPushButton(f"Тема: {self.settings.get('theme', 'light').capitalize()}")
+        title = QLabel("☕ Java Backend Вакансии")
+        title.setStyleSheet("color: white; font-size: 28px; font-weight: bold;")
+        subtitle = QLabel("Удаленная работа • Россия и Беларусь")
+        subtitle.setStyleSheet("color: rgba(255, 255, 255, 0.8); font-size: 14px;")
+
+        header_layout.addWidget(title)
+        header_layout.addWidget(subtitle)
+        main_layout.addWidget(header)
+
+        # Контент с отступами
+        content_widget = QWidget()
+        content_layout = QVBoxLayout(content_widget)
+        content_layout.setContentsMargins(20, 20, 20, 20)
+        content_layout.setSpacing(16)
+
+        # Статистика (карточка)
+        stats_card = QFrame()
+        stats_card.setObjectName("statsCard")
+        stats_layout = QHBoxLayout(stats_card)
+        stats_layout.setContentsMargins(24, 16, 24, 16)
+
+        # Всего вакансий
+        total_container = QVBoxLayout()
+        self.total_label = QLabel("0")
+        self.total_label.setStyleSheet("font-size: 32px; font-weight: bold; color: #6200EE;" if self.settings.get(
+            "theme") == "light" else "font-size: 32px; font-weight: bold; color: #BB86FC;")
+        total_text = QLabel("Всего вакансий")
+        total_text.setStyleSheet("font-size: 12px; opacity: 0.7;")
+        total_container.addWidget(self.total_label)
+        total_container.addWidget(total_text)
+
+        # Новых
+        new_container = QVBoxLayout()
+        self.new_label = QLabel("0")
+        self.new_label.setStyleSheet("font-size: 32px; font-weight: bold; color: #00C853;")
+        new_text = QLabel("Новых")
+        new_text.setStyleSheet("font-size: 12px; opacity: 0.7;")
+        new_container.addWidget(self.new_label)
+        new_container.addWidget(new_text)
+
+        stats_layout.addLayout(total_container)
+        stats_layout.addSpacing(40)
+        stats_layout.addLayout(new_container)
+        stats_layout.addStretch()
+
+        # Кнопки управления
+        buttons_layout = QHBoxLayout()
+        self.update_btn = QPushButton("🔄 Обновить")
+        self.theme_btn = QPushButton(f"🌙 Темная" if self.settings.get("theme") == "light" else "☀️ Светлая")
+        self.exit_btn = QPushButton("❌ Выход")
+
+        self.update_btn.setFixedHeight(45)
+        self.theme_btn.setFixedHeight(45)
+        self.exit_btn.setFixedHeight(45)
 
         self.update_btn.clicked.connect(self.update_vacancies)
         self.exit_btn.clicked.connect(self.close)
         self.theme_btn.clicked.connect(self.toggle_theme)
 
-        top_layout.addWidget(self.update_btn)
-        top_layout.addWidget(self.theme_btn)
-        top_layout.addWidget(self.exit_btn)
-        main_layout.addLayout(top_layout)
+        buttons_layout.addWidget(self.update_btn)
+        buttons_layout.addWidget(self.theme_btn)
+        buttons_layout.addWidget(self.exit_btn)
+        stats_layout.addLayout(buttons_layout)
 
-        # Настройки
-        settings_layout = QHBoxLayout()
-        settings_layout.addWidget(QLabel("Ключевое слово:"))
+        content_layout.addWidget(stats_card)
+
+        # Настройки поиска (карточка)
+        settings_card = QFrame()
+        settings_card.setObjectName("settingsCard")
+        settings_layout = QVBoxLayout(settings_card)
+        settings_layout.setContentsMargins(24, 16, 24, 16)
+        settings_layout.setSpacing(12)
+
+        # Заголовок настроек
+        settings_title = QLabel("⚙️ Настройки поиска")
+        settings_title.setStyleSheet("font-size: 16px; font-weight: bold;")
+        settings_layout.addWidget(settings_title)
+
+        # Строка 1
+        row1 = QHBoxLayout()
+        row1.addWidget(QLabel("Ключевое слово:"))
         self.query_input = QLineEdit()
         self.query_input.setText(self.settings.get("query", ""))
-        settings_layout.addWidget(self.query_input)
+        self.query_input.setPlaceholderText("Например: Python разработчик")
+        row1.addWidget(self.query_input, 1)
+        settings_layout.addLayout(row1)
 
-        settings_layout.addWidget(QLabel("Исключить (через запятую):"))
+        # Строка 2
+        row2 = QHBoxLayout()
+        row2.addWidget(QLabel("Исключить:"))
         self.exclude_input = QLineEdit()
         self.exclude_input.setText(self.settings.get("exclude", ""))
-        settings_layout.addWidget(self.exclude_input)
+        self.exclude_input.setPlaceholderText("Через запятую: Android, QA")
+        row2.addWidget(self.exclude_input, 1)
 
-        settings_layout.addWidget(QLabel("Период (дней):"))
+        row2.addWidget(QLabel("Период (дней):"))
         self.days_input = QSpinBox()
         self.days_input.setRange(1, 30)
         self.days_input.setValue(self.settings.get("days", 1))
-        settings_layout.addWidget(self.days_input)
+        self.days_input.setFixedWidth(80)
+        row2.addWidget(self.days_input)
 
-        self.save_settings_btn = QPushButton("Сохранить настройки")
+        self.save_settings_btn = QPushButton("💾 Сохранить")
+        self.save_settings_btn.setFixedHeight(35)
         self.save_settings_btn.clicked.connect(self.save_app_settings)
-        settings_layout.addWidget(self.save_settings_btn)
-        main_layout.addLayout(settings_layout)
+        row2.addWidget(self.save_settings_btn)
+        settings_layout.addLayout(row2)
 
-        # Кнопки управления
+        content_layout.addWidget(settings_card)
+
+        # Кнопки действий с вакансиями
         self.action_widget = QWidget()
         action_layout = QHBoxLayout(self.action_widget)
         action_layout.setContentsMargins(0, 0, 0, 0)
-        self.select_all_btn = QPushButton("Выбрать все новые")
-        self.mark_btn = QPushButton("Пометить выбранные как просмотренные")
+        self.select_all_btn = QPushButton("✅ Выбрать все новые")
+        self.mark_btn = QPushButton("👁️ Пометить как просмотренные")
+        self.select_all_btn.setFixedHeight(40)
+        self.mark_btn.setFixedHeight(40)
         self.select_all_btn.clicked.connect(self.select_all_new)
         self.mark_btn.clicked.connect(self.mark_selected_as_old)
         action_layout.addWidget(self.select_all_btn)
         action_layout.addWidget(self.mark_btn)
         action_layout.addStretch()
         self.action_widget.hide()
-        main_layout.addWidget(self.action_widget)
+        content_layout.addWidget(self.action_widget)
 
         # Таблица
         self.table = QTableWidget()
@@ -300,8 +580,11 @@ class VacancyApp(QMainWindow):
         self.table.horizontalHeader().setStretchLastSection(True)
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.table.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.table.setAlternatingRowColors(True)
         self.table.cellClicked.connect(self.on_cell_click)
-        main_layout.addWidget(self.table)
+        content_layout.addWidget(self.table)
+
+        main_layout.addWidget(content_widget)
 
     def save_app_settings(self):
         query = self.query_input.text().strip()
@@ -312,13 +595,13 @@ class VacancyApp(QMainWindow):
             return
         self.settings.update({"query": query, "exclude": exclude, "days": days})
         self.save_settings()
-        QMessageBox.information(self, "Успех", "Настройки сохранены!")
+        QMessageBox.information(self, "Успех", "✅ Настройки сохранены!")
 
     def update_table(self):
         logger.info("Обновление таблицы")
         new_count = sum(1 for v in self.vacancies if v.get('status') == 'NEW')
-        self.total_label.setText(f"Всего: {len(self.vacancies)}")
-        self.new_label.setText(f"Новых: {new_count}")
+        self.total_label.setText(str(len(self.vacancies)))
+        self.new_label.setText(str(new_count))
 
         if new_count > 0:
             self.action_widget.show()
@@ -330,6 +613,9 @@ class VacancyApp(QMainWindow):
         sorted_vacancies.sort(key=lambda x: 0 if x.get('status') == 'NEW' else 1)
 
         self.table.setRowCount(len(sorted_vacancies))
+
+        is_dark = self.settings.get("theme") == "dark"
+
         for row, v in enumerate(sorted_vacancies):
             # Чекбокс
             if v.get('status') == 'NEW':
@@ -339,12 +625,27 @@ class VacancyApp(QMainWindow):
                 self.table.setItem(row, 0, QTableWidgetItem(""))
 
             # Статус
-            status_text = "Новая" if v.get('status') == 'NEW' else "Просмотрена"
+            status_text = "🆕 Новая" if v.get('status') == 'NEW' else "👁️ Просмотрена"
             status_item = QTableWidgetItem(status_text)
+
             if v.get('status') == 'NEW':
-                status_item.setBackground(QColor("#d1fae5" if self.settings.get("theme") == "light" else "#1e5f3e"))
+                if is_dark:
+                    status_item.setBackground(QColor("#1B5E20"))
+                    status_item.setForeground(QColor("#69F0AE"))
+                else:
+                    status_item.setBackground(QColor("#C8E6C9"))
+                    status_item.setForeground(QColor("#1B5E20"))
             else:
-                status_item.setBackground(QColor("#fee2e2" if self.settings.get("theme") == "light" else "#5f1e1e"))
+                if is_dark:
+                    status_item.setBackground(QColor("#424242"))
+                    status_item.setForeground(QColor("#BDBDBD"))
+                else:
+                    status_item.setBackground(QColor("#F5F5F5"))
+                    status_item.setForeground(QColor("#757575"))
+
+            font = status_item.font()
+            font.setBold(True)
+            status_item.setFont(font)
             self.table.setItem(row, 1, status_item)
 
             self.table.setItem(row, 2, QTableWidgetItem(v.get('title', '-')))
@@ -354,9 +655,13 @@ class VacancyApp(QMainWindow):
             self.table.setItem(row, 6, QTableWidgetItem(v.get('date', '-')))
 
             # Кнопка "Открыть"
-            open_item = QTableWidgetItem("Открыть")
+            open_item = QTableWidgetItem("🔗 Открыть")
             open_item.setData(Qt.UserRole, v.get('link', ''))
             open_item.setTextAlignment(Qt.AlignCenter)
+            open_item.setForeground(QColor("#BB86FC" if is_dark else "#6200EE"))
+            font = open_item.font()
+            font.setBold(True)
+            open_item.setFont(font)
             self.table.setItem(row, 7, open_item)
 
         logger.info("Таблица обновлена")
@@ -396,9 +701,8 @@ class VacancyApp(QMainWindow):
     def update_vacancies(self):
         logger.info("Нажата кнопка 'Обновить'")
         self.update_btn.setEnabled(False)
-        self.update_btn.setText("Обновление...")
+        self.update_btn.setText("⏳ Обновление...")
 
-        # Создаем worker
         self.worker = UpdateWorker(self.settings.copy())
         self.worker.finished.connect(self.on_update_finished)
         self.worker.error.connect(self.on_update_error)
@@ -407,33 +711,44 @@ class VacancyApp(QMainWindow):
     def on_update_finished(self, truly_new):
         logger.info(f"Обновление завершено: {len(truly_new)} новых вакансий")
 
-        # Добавляем новые вакансии
         self.vacancies.extend(truly_new)
-
-        # Обновляем таблицу
         self.update_table()
 
-        # Восстанавливаем кнопку
         self.update_btn.setEnabled(True)
-        self.update_btn.setText("Обновить")
+        self.update_btn.setText("🔄 Обновить")
 
-        # Показываем сообщение
         if truly_new:
-            QMessageBox.information(self, "Успех", f"Найдено {len(truly_new)} новых вакансий")
+            msg = QMessageBox(self)
+            msg.setIcon(QMessageBox.Information)
+            msg.setWindowTitle("Успех")
+            msg.setText(f"✅ Найдено {len(truly_new)} новых вакансий!")
+            msg.setStandardButtons(QMessageBox.Ok)
+            msg.exec()
         else:
-            QMessageBox.information(self, "Информация", "Нет новых вакансий")
+            msg = QMessageBox(self)
+            msg.setIcon(QMessageBox.Information)
+            msg.setWindowTitle("Информация")
+            msg.setText("ℹ️ Нет новых вакансий")
+            msg.setStandardButtons(QMessageBox.Ok)
+            msg.exec()
 
     def on_update_error(self, error_msg):
         logger.error(f"Ошибка обновления: {error_msg}")
-        QMessageBox.critical(self, "Ошибка", f"Ошибка при обновлении:\n{error_msg}")
+        msg = QMessageBox(self)
+        msg.setIcon(QMessageBox.Critical)
+        msg.setWindowTitle("Ошибка")
+        msg.setText(f"❌ Ошибка при обновлении:\n{error_msg}")
+        msg.setStandardButtons(QMessageBox.Ok)
+        msg.exec()
+
         self.update_btn.setEnabled(True)
-        self.update_btn.setText("Обновить")
+        self.update_btn.setText("🔄 Обновить")
 
     def select_all_new(self):
         logger.info("Выбор всех новых вакансий")
         for row in range(self.table.rowCount()):
             item = self.table.item(row, 1)
-            if item and item.text() == "Новая":
+            if item and "Новая" in item.text():
                 checkbox = self.table.cellWidget(row, 0)
                 if checkbox:
                     checkbox.setChecked(True)
@@ -456,9 +771,19 @@ class VacancyApp(QMainWindow):
         if updated > 0:
             self.save_vacancies_to_file()
             self.update_table()
-            QMessageBox.information(self, "Успех", f"Помечено {updated} вакансий как просмотренные")
+            msg = QMessageBox(self)
+            msg.setIcon(QMessageBox.Information)
+            msg.setWindowTitle("Успех")
+            msg.setText(f"✅ Помечено {updated} вакансий как просмотренные")
+            msg.setStandardButtons(QMessageBox.Ok)
+            msg.exec()
         else:
-            QMessageBox.warning(self, "Внимание", "Не выбрано ни одной вакансии")
+            msg = QMessageBox(self)
+            msg.setIcon(QMessageBox.Warning)
+            msg.setWindowTitle("Внимание")
+            msg.setText("⚠️ Не выбрано ни одной вакансии")
+            msg.setStandardButtons(QMessageBox.Ok)
+            msg.exec()
 
 
 if __name__ == "__main__":
