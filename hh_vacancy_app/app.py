@@ -14,7 +14,14 @@ from PySide6.QtWidgets import (
     QFrame, QGroupBox
 )
 from PySide6.QtCore import Qt, Signal, QObject, QThread
-from PySide6.QtGui import QDesktopServices, QColor, QPalette, QFont
+from PySide6.QtGui import QDesktopServices, QColor, QPalette, QFont, QIcon
+
+
+def resource_path(relative_path):
+    """Возвращает абсолютный путь до ресурса, работает и в exe, и в dev-режиме"""
+    if hasattr(sys, '_MEIPASS'):
+        return os.path.join(sys._MEIPASS, relative_path)
+    return os.path.join(os.path.dirname(__file__), relative_path)
 
 # Настройка логирования
 logging.basicConfig(
@@ -208,9 +215,15 @@ class UpdateWorker(QThread):
 
 
 class VacancyApp(QMainWindow):
+
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Удобные Вакансии — HH.ru")
+        icon_path = resource_path("icon.png")
+        if os.path.exists(icon_path):
+            self.setWindowIcon(QIcon(icon_path))
+        else:
+            logger.warning(f"Иконка {icon_path} не найдена")
         self.resize(1500, 900)
         self.vacancies = []
         self.worker = None
@@ -526,6 +539,11 @@ class VacancyApp(QMainWindow):
         main_layout.setSpacing(0)
         main_layout.setContentsMargins(0, 0, 0, 0)
 
+        # Меню "О программе"
+        menubar = self.menuBar()
+        help_menu = menubar.addMenu("Справка")
+        help_menu.addAction("О программе", self.show_about_dialog)
+
         # Компактная шапка
         header = QFrame()
         header.setObjectName("header")
@@ -549,18 +567,23 @@ class VacancyApp(QMainWindow):
         buttons_layout = QHBoxLayout()
         self.update_btn = QPushButton("Обновить")
         self.theme_btn = QPushButton("Темная" if self.settings.get("theme") == "light" else "Светлая")
+        self.about_btn = QPushButton("О программе")
         self.exit_btn = QPushButton("Выход")
 
-        self.update_btn.setFixedSize(110, 40)
+        self.update_btn.setFixedSize(120, 40)
         self.theme_btn.setFixedSize(110, 40)
+        self.about_btn.setMinimumWidth(140)
+        self.about_btn.setFixedHeight(40)
         self.exit_btn.setFixedSize(110, 40)
 
         self.update_btn.clicked.connect(self.update_vacancies)
         self.exit_btn.clicked.connect(self.close)
         self.theme_btn.clicked.connect(self.toggle_theme)
+        self.about_btn.clicked.connect(self.show_about_dialog)
 
         buttons_layout.addWidget(self.update_btn)
         buttons_layout.addWidget(self.theme_btn)
+        buttons_layout.addWidget(self.about_btn)
         buttons_layout.addWidget(self.exit_btn)
         header_layout.addLayout(buttons_layout)
 
@@ -731,7 +754,8 @@ class VacancyApp(QMainWindow):
         header.resizeSection(0, 45)
         header.setSectionResizeMode(1, QHeaderView.Fixed)
         header.resizeSection(1, 120)
-        header.setSectionResizeMode(2, QHeaderView.Stretch)
+        header.setSectionResizeMode(2, QHeaderView.Fixed)
+        header.resizeSection(2, 350)
         header.setSectionResizeMode(3, QHeaderView.ResizeToContents)
         header.setSectionResizeMode(4, QHeaderView.ResizeToContents)
         header.setSectionResizeMode(5, QHeaderView.Fixed)
@@ -740,7 +764,7 @@ class VacancyApp(QMainWindow):
         header.setSectionResizeMode(7, QHeaderView.Fixed)
         header.resizeSection(7, 90)
         header.setSectionResizeMode(8, QHeaderView.Fixed)
-        header.resizeSection(8, 90)
+        header.resizeSection(8, 160)
 
         # Высота строк
         self.table.verticalHeader().setDefaultSectionSize(40)
@@ -909,7 +933,13 @@ class VacancyApp(QMainWindow):
     def on_update_finished(self, truly_new):
         logger.info(f"Обновление завершено: {len(truly_new)} новых вакансий")
 
+        # Помечаем новые вакансии статусом NEW, добавляем в основной список
+        for v in truly_new:
+            if 'status' not in v:
+                v['status'] = 'NEW'
         self.vacancies.extend(truly_new)
+        # Сохраняем общий файл (worker уже сохранял, но сохраняем для синхронизации)
+        self.save_vacancies_to_file()
         self.update_table()
 
         self.update_btn.setEnabled(True)
@@ -957,7 +987,7 @@ class VacancyApp(QMainWindow):
         for row in range(self.table.rowCount()):
             checkbox = self.table.cellWidget(row, 0)
             if checkbox and checkbox.isChecked():
-                link_item = self.table.item(row, 8)  # Обновлен индекс столбца
+                link_item = self.table.item(row, 8)  # столбец с действием содержит ссылку в UserRole
                 link = link_item.data(Qt.UserRole) if link_item else ""
                 if link:
                     for v in self.vacancies:
@@ -982,6 +1012,24 @@ class VacancyApp(QMainWindow):
             msg.setText("⚠️ Не выбрано ни одной вакансии")
             msg.setStandardButtons(QMessageBox.Ok)
             msg.exec()
+
+    def show_about_dialog(self):
+        """Показывает информацию о приложении и разработчике"""
+        text = (
+            "<b>Удобные Вакансии — HH.ru</b><br><br>"
+            "Разработчик: Максим К.<br>"
+            "Email: <a href='mailto:maximkisten@gmail.com'>maximkisten@gmail.com</a><br>"
+            "Telegram: <a href='https://t.me/maximkisten'>@maximkisten</a><br><br>"
+            "Все мысли и пожелания готов принимать по указанным контактам."
+        )
+
+        msg = QMessageBox(self)
+        msg.setIcon(QMessageBox.Information)
+        msg.setWindowTitle("О программе")
+        msg.setTextFormat(Qt.RichText)
+        msg.setText(text)
+        msg.setStandardButtons(QMessageBox.Ok)
+        msg.exec()
 
 
 if __name__ == "__main__":
