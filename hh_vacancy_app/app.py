@@ -11,7 +11,7 @@ from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QLabel, QLineEdit, QTableWidget, QTableWidgetItem,
     QHeaderView, QMessageBox, QAbstractItemView, QCheckBox, QSpinBox,
-    QFrame
+    QFrame, QGroupBox
 )
 from PySide6.QtCore import Qt, Signal, QObject, QThread
 from PySide6.QtGui import QDesktopServices, QColor, QPalette, QFont
@@ -34,7 +34,16 @@ DEFAULT_SETTINGS = {
     "query": "Java разработчик",
     "exclude": "Android, QA, Тестировщик, Аналитик, C#, архитектор, PHP, Fullstack, 1С, Python, Frontend-разработчик",
     "days": 1,
-    "theme": "light"
+    "theme": "light",
+    "work_types": {
+        "remote": True,
+        "hybrid": False,
+        "office": False
+    },
+    "countries": {
+        "russia": True,
+        "belarus": True
+    }
 }
 
 
@@ -88,23 +97,61 @@ class UpdateWorker(QThread):
 
         logger.debug(f"Поисковый запрос: {search_text}")
 
-        params = {
+        # Определяем типы работы
+        work_types = self.settings.get('work_types', {})
+        schedules = []
+        if work_types.get('remote'):
+            schedules.append('remote')
+        if work_types.get('hybrid'):
+            schedules.append('hybrid')
+        if work_types.get('office'):
+            schedules.append('fullDay')
+
+        # Определяем страны
+        countries = self.settings.get('countries', {})
+        areas = []
+        if countries.get('russia'):
+            areas.append(113)  # Россия
+        if countries.get('belarus'):
+            areas.append(16)  # Беларусь
+
+        # Базовые параметры
+        base_params = {
             "text": search_text,
-            "area": [113, 16],
-            "schedule": "remote",
             "per_page": 50,
             "page": 0,
             "date_from": date_from,
             "professional_role": 96
         }
 
+        logger.debug(f"Выбранные типы работы: {schedules}")
+        logger.debug(f"Выбранные страны: {areas}")
+
         vacancies = []
         API_URL = "https://api.hh.ru/vacancies"
         max_pages = 5
 
-        while params["page"] < max_pages:
+        while base_params["page"] < max_pages:
             try:
-                logger.debug(f"Запрос страницы {params['page'] + 1}")
+                logger.debug(f"Запрос страницы {base_params['page'] + 1}")
+
+                # Формируем параметры для каждого запроса
+                params = []
+                for key, value in base_params.items():
+                    params.append((key, value))
+
+                # Добавляем schedule только если выбраны типы работы
+                if schedules:
+                    for schedule in schedules:
+                        params.append(('schedule', schedule))
+
+                # Добавляем area только если выбраны страны
+                if areas:
+                    for area in areas:
+                        params.append(('area', area))
+
+                logger.debug(f"Параметры запроса: {params}")
+
                 resp = requests.get(API_URL, params=params, timeout=10)
 
                 if resp.status_code != 200:
@@ -113,7 +160,7 @@ class UpdateWorker(QThread):
 
                 data = resp.json()
                 items = data.get("items", [])
-                logger.debug(f"Получено {len(items)} вакансий на странице {params['page'] + 1}")
+                logger.debug(f"Получено {len(items)} вакансий на странице {base_params['page'] + 1}")
 
                 for item in items:
                     salary_info = item.get("salary")
@@ -133,6 +180,10 @@ class UpdateWorker(QThread):
                     raw_date = item.get("published_at")
                     date_str = raw_date[:10] if isinstance(raw_date, str) and len(raw_date) >= 10 else ''
 
+                    # Определяем тип работы
+                    schedule = item.get("schedule", {})
+                    schedule_name = schedule.get("name", "-") if isinstance(schedule, dict) else str(schedule)
+
                     vacancies.append({
                         "title": item.get("name", "-"),
                         "company": item.get("employer", {}).get("name", "-"),
@@ -140,12 +191,13 @@ class UpdateWorker(QThread):
                         "salary": salary,
                         "date": date_str,
                         "link": item.get("alternate_url", "#"),
+                        "schedule": schedule_name,
                         "status": "NEW"
                     })
 
-                if params["page"] >= data.get("pages", 1) - 1:
+                if base_params["page"] >= data.get("pages", 1) - 1:
                     break
-                params["page"] += 1
+                base_params["page"] += 1
 
             except Exception as e:
                 logger.error(f"Ошибка при получении данных: {e}")
@@ -159,7 +211,7 @@ class VacancyApp(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Java Backend Вакансии — HH.ru")
-        self.resize(1400, 900)
+        self.resize(1500, 900)
         self.vacancies = []
         self.worker = None
         logger.info("Запуск приложения")
@@ -174,7 +226,15 @@ class VacancyApp(QMainWindow):
         if os.path.exists(SETTINGS_FILE):
             try:
                 with open(SETTINGS_FILE, 'r', encoding='utf-8') as f:
-                    self.settings = json.load(f)
+                    loaded_settings = json.load(f)
+                    # Объединяем с настройками по умолчанию для обратной совместимости
+                    self.settings = DEFAULT_SETTINGS.copy()
+                    self.settings.update(loaded_settings)
+                    # Убедимся что work_types и countries существуют
+                    if 'work_types' not in self.settings:
+                        self.settings['work_types'] = DEFAULT_SETTINGS['work_types'].copy()
+                    if 'countries' not in self.settings:
+                        self.settings['countries'] = DEFAULT_SETTINGS['countries'].copy()
                 logger.info("Настройки загружены из файла")
             except Exception as e:
                 logger.error(f"Ошибка загрузки настроек: {e}")
@@ -307,6 +367,19 @@ class VacancyApp(QMainWindow):
                     border: 2px solid #2D2D2D;
                     padding: 16px;
                 }
+                QGroupBox {
+                    color: #E1E1E1;
+                    border: 2px solid #3D3D3D;
+                    border-radius: 8px;
+                    margin-top: 12px;
+                    padding-top: 12px;
+                    font-weight: bold;
+                }
+                QGroupBox::title {
+                    subcontrol-origin: margin;
+                    left: 12px;
+                    padding: 0 5px;
+                }
             """)
         else:
             # Material Light Theme
@@ -419,6 +492,19 @@ class VacancyApp(QMainWindow):
                     border-radius: 12px;
                     border: none;
                     padding: 16px;
+                }
+                QGroupBox {
+                    color: #212121;
+                    border: 2px solid #E0E0E0;
+                    border-radius: 8px;
+                    margin-top: 12px;
+                    padding-top: 12px;
+                    font-weight: bold;
+                }
+                QGroupBox::title {
+                    subcontrol-origin: margin;
+                    left: 12px;
+                    padding: 0 5px;
                 }
             """)
 
@@ -546,12 +632,57 @@ class VacancyApp(QMainWindow):
         self.days_input.setValue(self.settings.get("days", 1))
         self.days_input.setFixedWidth(80)
         row2.addWidget(self.days_input)
-
-        self.save_settings_btn = QPushButton("💾 Сохранить")
-        self.save_settings_btn.setFixedHeight(35)
-        self.save_settings_btn.clicked.connect(self.save_app_settings)
-        row2.addWidget(self.save_settings_btn)
         settings_layout.addLayout(row2)
+
+        # Строка 3: Тип работы и страны
+        row3 = QHBoxLayout()
+
+        # Группа: Тип работы
+        work_type_group = QGroupBox("💼 Тип работы")
+        work_type_layout = QHBoxLayout()
+
+        self.remote_checkbox = QCheckBox("Удаленная")
+        self.remote_checkbox.setChecked(self.settings.get('work_types', {}).get('remote', True))
+
+        self.hybrid_checkbox = QCheckBox("Гибрид")
+        self.hybrid_checkbox.setChecked(self.settings.get('work_types', {}).get('hybrid', False))
+
+        self.office_checkbox = QCheckBox("Офис")
+        self.office_checkbox.setChecked(self.settings.get('work_types', {}).get('office', False))
+
+        work_type_layout.addWidget(self.remote_checkbox)
+        work_type_layout.addWidget(self.hybrid_checkbox)
+        work_type_layout.addWidget(self.office_checkbox)
+        work_type_layout.addStretch()
+        work_type_group.setLayout(work_type_layout)
+
+        # Группа: Страны
+        country_group = QGroupBox("🌍 Страны")
+        country_layout = QHBoxLayout()
+
+        self.russia_checkbox = QCheckBox("Россия")
+        self.russia_checkbox.setChecked(self.settings.get('countries', {}).get('russia', True))
+
+        self.belarus_checkbox = QCheckBox("Беларусь")
+        self.belarus_checkbox.setChecked(self.settings.get('countries', {}).get('belarus', True))
+
+        country_layout.addWidget(self.russia_checkbox)
+        country_layout.addWidget(self.belarus_checkbox)
+        country_layout.addStretch()
+        country_group.setLayout(country_layout)
+
+        row3.addWidget(work_type_group)
+        row3.addWidget(country_group)
+        settings_layout.addLayout(row3)
+
+        # Кнопка сохранения настроек
+        save_row = QHBoxLayout()
+        save_row.addStretch()
+        self.save_settings_btn = QPushButton("💾 Сохранить настройки")
+        self.save_settings_btn.setFixedHeight(40)
+        self.save_settings_btn.clicked.connect(self.save_app_settings)
+        save_row.addWidget(self.save_settings_btn)
+        settings_layout.addLayout(save_row)
 
         content_layout.addWidget(settings_card)
 
@@ -573,9 +704,9 @@ class VacancyApp(QMainWindow):
 
         # Таблица
         self.table = QTableWidget()
-        self.table.setColumnCount(8)
+        self.table.setColumnCount(9)  # Добавлен столбец для типа работы
         self.table.setHorizontalHeaderLabels(
-            ["", "Статус", "Название", "Компания", "Город", "Зарплата", "Дата", "Действие"])
+            ["", "Статус", "Название", "Компания", "Город", "Тип работы", "Зарплата", "Дата", "Действие"])
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
         self.table.horizontalHeader().setStretchLastSection(True)
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
@@ -590,10 +721,32 @@ class VacancyApp(QMainWindow):
         query = self.query_input.text().strip()
         exclude = self.exclude_input.text().strip()
         days = self.days_input.value()
+
         if not query:
             QMessageBox.warning(self, "Ошибка", "Укажите ключевое слово")
             return
-        self.settings.update({"query": query, "exclude": exclude, "days": days})
+
+        # Сохраняем типы работы
+        work_types = {
+            'remote': self.remote_checkbox.isChecked(),
+            'hybrid': self.hybrid_checkbox.isChecked(),
+            'office': self.office_checkbox.isChecked()
+        }
+
+        # Сохраняем страны
+        countries = {
+            'russia': self.russia_checkbox.isChecked(),
+            'belarus': self.belarus_checkbox.isChecked()
+        }
+
+        self.settings.update({
+            "query": query,
+            "exclude": exclude,
+            "days": days,
+            "work_types": work_types,
+            "countries": countries
+        })
+
         self.save_settings()
         QMessageBox.information(self, "Успех", "✅ Настройки сохранены!")
 
@@ -651,8 +804,14 @@ class VacancyApp(QMainWindow):
             self.table.setItem(row, 2, QTableWidgetItem(v.get('title', '-')))
             self.table.setItem(row, 3, QTableWidgetItem(v.get('company', '-')))
             self.table.setItem(row, 4, QTableWidgetItem(v.get('city', '-')))
-            self.table.setItem(row, 5, QTableWidgetItem(v.get('salary', '-')))
-            self.table.setItem(row, 6, QTableWidgetItem(v.get('date', '-')))
+
+            # Тип работы
+            schedule = v.get('schedule', '-')
+            schedule_item = QTableWidgetItem(schedule)
+            self.table.setItem(row, 5, schedule_item)
+
+            self.table.setItem(row, 6, QTableWidgetItem(v.get('salary', '-')))
+            self.table.setItem(row, 7, QTableWidgetItem(v.get('date', '-')))
 
             # Кнопка "Открыть"
             open_item = QTableWidgetItem("🔗 Открыть")
@@ -662,12 +821,12 @@ class VacancyApp(QMainWindow):
             font = open_item.font()
             font.setBold(True)
             open_item.setFont(font)
-            self.table.setItem(row, 7, open_item)
+            self.table.setItem(row, 8, open_item)
 
         logger.info("Таблица обновлена")
 
     def on_cell_click(self, row, column):
-        if column == 7:
+        if column == 8:  # Столбец "Действие"
             item = self.table.item(row, column)
             if item:
                 link = item.data(Qt.UserRole)
@@ -759,7 +918,7 @@ class VacancyApp(QMainWindow):
         for row in range(self.table.rowCount()):
             checkbox = self.table.cellWidget(row, 0)
             if checkbox and checkbox.isChecked():
-                link_item = self.table.item(row, 7)
+                link_item = self.table.item(row, 8)  # Обновлен индекс столбца
                 link = link_item.data(Qt.UserRole) if link_item else ""
                 if link:
                     for v in self.vacancies:
