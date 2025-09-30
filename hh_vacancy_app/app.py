@@ -97,11 +97,9 @@ class UpdateWorker(QThread):
 
     def get_vacancies_from_api(self):
         date_from = (datetime.now() - timedelta(days=int(self.settings['days']))).strftime("%Y-%m-%dT%H:%M:%S")
-
         exclude_list = [w.strip() for w in self.settings['exclude'].split(',') if w.strip()]
         exclude_str = " NOT ".join(exclude_list)
         search_text = f"{self.settings['query']} NOT {exclude_str}" if exclude_str else self.settings['query']
-
         logger.debug(f"Поисковый запрос: {search_text}")
 
         # Определяем типы работы
@@ -138,36 +136,81 @@ class UpdateWorker(QThread):
         API_URL = "https://api.hh.ru/vacancies"
         max_pages = 5
 
-        while base_params["page"] < max_pages:
+        # --- КЛЮЧЕВОЕ ИЗМЕНЕНИЕ ---
+        # Определяем, нужно ли использовать фильтр по schedule
+        use_schedule_filter = True
+        # Если выбраны ВСЕ типы работы, не используем фильтр schedule
+        if len(schedules) == 3 and 'remote' in schedules and 'hybrid' in schedules and 'fullDay' in schedules:
+            logger.info("Выбраны все типы работы. Фильтр 'schedule' будет пропущен.")
+            use_schedule_filter = False
+
+        # --- КЛЮЧЕВОЕ ИЗМЕНЕНИЕ ---
+        # Если фильтр schedule используется, но выбрано несколько значений,
+        # нужно выполнить отдельные запросы для каждого значения.
+        if use_schedule_filter and len(schedules) > 1:
+            logger.info(f"Выбрано несколько типов работы ({schedules}). Выполняем отдельные запросы.")
+            all_vacancies_aggregated = []
+            for single_schedule in schedules:
+                logger.debug(f"Запрашиваем вакансии для типа работы: {single_schedule}")
+                # Создаем параметры для текущего типа работы
+                current_params = base_params.copy()
+                current_params['schedule'] = single_schedule
+                if areas:  # Добавляем регионы, если они заданы
+                    current_params['area'] = areas  # Передаем список регионов
+
+                # Выполняем поиск для одного типа работы
+                schedule_vacancies = self._fetch_vacancies(API_URL, current_params, max_pages)
+                all_vacancies_aggregated.extend(schedule_vacancies)
+            # Убираем дубликаты вакансий, которые могли быть найдены по разным типам работы
+            seen_links = set()
+            unique_vacancies = []
+            for v in all_vacancies_aggregated:
+                if v['link'] not in seen_links:
+                    seen_links.add(v['link'])
+                    unique_vacancies.append(v)
+            vacancies = unique_vacancies
+
+        # --- КЛЮЧЕВОЕ ИЗМЕНЕНИЕ ---
+        # Если фильтр schedule используется, но выбрано ОДНО значение
+        elif use_schedule_filter and len(schedules) == 1:
+            logger.info(f"Выбран один тип работы: {schedules[0]}. Выполняем обычный запрос.")
+            current_params = base_params.copy()
+            current_params['schedule'] = schedules[0]
+            if areas:
+                current_params['area'] = areas
+            vacancies = self._fetch_vacancies(API_URL, current_params, max_pages)
+
+        # --- КЛЮЧЕВОЕ ИЗМЕНЕНИЕ ---
+        # Если фильтр schedule НЕ используется (выбраны все)
+        else:  # not use_schedule_filter
+            logger.info("Фильтр 'schedule' пропущен. Выполняем запрос без него.")
+            current_params = base_params.copy()
+            if areas:
+                current_params['area'] = areas
+            vacancies = self._fetch_vacancies(API_URL, current_params, max_pages)
+
+        logger.info(f"Получено {len(vacancies)} уникальных вакансий с API (после объединения/фильтрации)")
+        return vacancies
+
+    # --- ВСПОМОГАТЕЛЬНЫЙ МЕТОД ---
+    def _fetch_vacancies(self, api_url, params, max_pages):
+        """Вспомогательный метод для выполнения запросов к API с заданными параметрами."""
+        fetched_vacancies = []
+        current_params = params.copy()  # Работаем с копией, чтобы не менять оригинальные параметры
+        page = current_params.get('page', 0)
+        while page < max_pages:
             try:
-                logger.debug(f"Запрос страницы {base_params['page'] + 1}")
+                logger.debug(f"Запрос страницы {page + 1} с параметрами: {current_params}")
 
-                # Формируем параметры для каждого запроса
-                params = []
-                for key, value in base_params.items():
-                    params.append((key, value))
-
-                # Добавляем schedule только если выбраны типы работы
-                if schedules:
-                    for schedule in schedules:
-                        params.append(('schedule', schedule))
-
-                # Добавляем area только если выбраны страны
-                if areas:
-                    for area in areas:
-                        params.append(('area', area))
-
-                logger.debug(f"Параметры запроса: {params}")
-
-                resp = requests.get(API_URL, params=params, timeout=10)
-
+                resp = requests.get(api_url, params=current_params, timeout=10)
                 if resp.status_code != 200:
-                    logger.warning(f"API вернул статус {resp.status_code}")
+                    logger.warning(f"API вернул статус {resp.status_code} для параметров: {current_params}")
+                    if resp.status_code == 400:
+                        logger.error("Возможно, неверные параметры запроса. Проверьте логи выше.")
                     break
-
                 data = resp.json()
                 items = data.get("items", [])
-                logger.debug(f"Получено {len(items)} вакансий на странице {base_params['page'] + 1}")
+                logger.debug(f"Получено {len(items)} вакансий на странице {page + 1}")
 
                 for item in items:
                     salary_info = item.get("salary")
@@ -191,7 +234,7 @@ class UpdateWorker(QThread):
                     schedule = item.get("schedule", {})
                     schedule_name = schedule.get("name", "-") if isinstance(schedule, dict) else str(schedule)
 
-                    vacancies.append({
+                    fetched_vacancies.append({
                         "title": item.get("name", "-"),
                         "company": item.get("employer", {}).get("name", "-"),
                         "city": item.get("area", {}).get("name", "-"),
@@ -202,16 +245,14 @@ class UpdateWorker(QThread):
                         "status": "NEW"
                     })
 
-                if base_params["page"] >= data.get("pages", 1) - 1:
+                if page >= data.get("pages", 1) - 1:
                     break
-                base_params["page"] += 1
-
+                page += 1
+                current_params['page'] = page  # Увеличиваем номер страницы в копии параметров
             except Exception as e:
-                logger.error(f"Ошибка при получении данных: {e}")
+                logger.error(f"Ошибка при получении данных на странице {page} с параметрами {current_params}: {e}")
                 break
-
-        logger.info(f"Получено {len(vacancies)} вакансий с API")
-        return vacancies
+        return fetched_vacancies
 
 
 class VacancyApp(QMainWindow):
