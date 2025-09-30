@@ -11,10 +11,10 @@ from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QLabel, QLineEdit, QTableWidget, QTableWidgetItem,
     QHeaderView, QMessageBox, QDialog, QAbstractItemView, QCheckBox, QSpinBox,
-    QFrame, QGroupBox
+    QFrame, QGroupBox, QSystemTrayIcon, QMenu
 )
-from PySide6.QtCore import Qt, Signal, QObject, QThread
-from PySide6.QtGui import QDesktopServices, QColor, QPalette, QFont, QIcon, QPixmap
+from PySide6.QtCore import Qt, Signal, QObject, QThread, QTimer
+from PySide6.QtGui import QDesktopServices, QColor, QPalette, QFont, QIcon, QPixmap, QAction
 
 
 
@@ -51,6 +51,10 @@ DEFAULT_SETTINGS = {
     "countries": {
         "russia": True,
         "belarus": True
+    },
+    "auto_update": {
+        "enabled": False,
+        "interval_minutes": 30
     }
 }
 
@@ -314,25 +318,195 @@ class SupportDialog(QDialog):
     # Опционально: переопределить closeEvent, если нужно что-то сделать при закрытии
 
 class VacancyApp(QMainWindow):
-
-
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Удобные Вакансии — HH.ru")
         icon_path = resource_path("icon.png")
         if os.path.exists(icon_path):
             self.setWindowIcon(QIcon(icon_path))
+            logger.info(f"Иконка приложения загружена: {icon_path}")
         else:
-            logger.warning(f"Иконка {icon_path} не найдена")
+            logger.warning(f"Иконка приложения {icon_path} не найдена")
         self.resize(1500, 900)
         self.vacancies = []
         self.worker = None
+        self.auto_update_timer = QTimer(self)
+        self.auto_update_timer.timeout.connect(self.auto_update_check)
         logger.info("Запуск приложения")
         self.load_settings()
         self.init_ui()
         self.apply_theme()
         self.load_vacancies_from_file()
         self.update_table()
+        self.setup_auto_update()
+
+        # Настройка системного трея
+        self.tray_icon = None  # Инициализируем как None для проверки
+        self.setup_system_tray()
+
+    def setup_system_tray(self):
+        """Настройка системного трея"""
+        # Проверяем поддержку системного трея
+        if not QSystemTrayIcon.isSystemTrayAvailable():
+            logger.warning("Системный трей не поддерживается на этой платформе")
+            QMessageBox.warning(self, "Предупреждение",
+                                "Системный трей не поддерживается. Приложение будет закрываться при нажатии на крестик.")
+            return
+
+        # Создаем иконку трея
+        self.tray_icon = QSystemTrayIcon(self)
+        tray_icon_path = resource_path("icon.png")
+        if os.path.exists(tray_icon_path):
+            self.tray_icon.setIcon(QIcon(tray_icon_path))
+            logger.info(f"Иконка трея загружена: {tray_icon_path}")
+        else:
+            logger.warning(f"Иконка трея {tray_icon_path} не найдена, используется стандартная иконка")
+            self.tray_icon.setIcon(self.windowIcon() or QIcon())  # Запасной вариант: иконка окна или пустая
+
+        # Устанавливаем всплывающую подсказку
+        self.tray_icon.setToolTip("Удобные Вакансии")
+
+        # Создаем контекстное меню для трея
+        tray_menu = QMenu()
+
+        # Действие "Показать"
+        show_action = QAction("Показать", self)
+        show_action.triggered.connect(self.show_and_restore)
+        tray_menu.addAction(show_action)
+
+        # Действие "Обновить вакансии"
+        update_action = QAction("Обновить вакансии", self)
+        update_action.triggered.connect(self.update_vacancies)
+        tray_menu.addAction(update_action)
+
+        # Действие "Выход"
+        exit_action = QAction("Выход", self)
+        exit_action.triggered.connect(self.close_application)
+        tray_menu.addAction(exit_action)
+
+        self.tray_icon.setContextMenu(tray_menu)
+        self.tray_icon.activated.connect(self.tray_icon_activated)
+
+        # Показываем иконку в трее
+        self.tray_icon.show()
+        if self.tray_icon.isVisible():
+            logger.info("Иконка системного трея успешно отображается")
+        else:
+            logger.error("Иконка системного трея не отображается, проверьте настройки Windows 11")
+
+    def show_and_restore(self):
+        """Показать и восстановить окно"""
+        self.show()
+        self.setWindowState(Qt.WindowNoState)  # Сбрасываем состояние (не максимизировано)
+        self.raise_()  # Поднимаем окно на передний план
+        self.activateWindow()  # Фокусируем окно
+        logger.info("Окно приложения восстановлено из трея")
+
+    def tray_icon_activated(self, reason):
+        """Обработка событий иконки трея"""
+        if reason == QSystemTrayIcon.DoubleClick:
+            self.show_and_restore()
+            logger.info("Окно приложения открыто по двойному клику на иконке трея")
+
+    def closeEvent(self, event):
+        """Переопределение события закрытия окна"""
+        if self.tray_icon and self.tray_icon.isVisible():
+            self.hide()  # Скрываем окно вместо закрытия
+            event.ignore()  # Игнорируем событие закрытия
+            self.tray_icon.showMessage(
+                "Удобные Вакансии",
+                "Приложение свернуто в системный трей. Используйте контекстное меню для выхода.",
+                QSystemTrayIcon.Information,
+                3000  # Увеличена длительность уведомления для Windows 11
+            )
+            logger.info("Окно свернуто в системный трей")
+        else:
+            logger.info("Системный трей недоступен или не инициализирован, приложение будет закрыто")
+            event.accept()
+
+    def close_application(self):
+        """Полное завершение приложения"""
+        logger.info("Завершение приложения")
+        self.auto_update_timer.stop()
+        if self.worker and self.worker.isRunning():
+            self.worker.terminate()
+            self.worker.wait()
+        if self.tray_icon:
+            self.tray_icon.hide()  # Скрываем иконку трея
+            logger.info("Иконка трея скрыта")
+        self.close()  # Закрываем окно
+        QApplication.quit()  # Завершаем приложение
+
+    def setup_auto_update(self):
+        """Настройка автообновления"""
+        auto_update_settings = self.settings.get('auto_update', {})
+        enabled = auto_update_settings.get('enabled', False)
+        interval = auto_update_settings.get('interval_minutes', 30)
+
+        self.auto_update_timer.stop()
+
+        if enabled:
+            interval_ms = interval * 60 * 1000  # конвертируем минуты в миллисекунды
+            self.auto_update_timer.start(interval_ms)
+            logger.info(f"Автообновление включено: каждые {interval} минут")
+        else:
+            logger.info("Автообновление выключено")
+
+    def auto_update_check(self):
+        """Автоматическая проверка новых вакансий"""
+        logger.info("Запуск автообновления")
+        if self.worker and self.worker.isRunning():
+            logger.info("Обновление уже выполняется, пропускаем")
+            return
+
+        self.worker = UpdateWorker(self.settings.copy())
+        self.worker.finished.connect(self.on_auto_update_finished)
+        self.worker.error.connect(self.on_update_error)
+        self.worker.start()
+
+    def on_auto_update_finished(self, truly_new):
+        """Обработка результатов автообновления"""
+        logger.info(f"Автообновление завершено: {len(truly_new)} новых вакансий")
+
+        for v in truly_new:
+            if 'status' not in v:
+                v['status'] = 'NEW'
+
+        self.vacancies.extend(truly_new)
+        self.save_vacancies_to_file()
+        self.update_table()
+
+        if truly_new:
+            # Показываем уведомление о новых вакансиях
+            msg = QMessageBox(self)
+            msg.setIcon(QMessageBox.Information)
+            msg.setWindowTitle("Новые вакансии!")
+            msg.setText(f"Найдено {len(truly_new)} новых вакансий!")
+            msg.setInformativeText("Проверьте таблицу для просмотра деталей.")
+            msg.setStandardButtons(QMessageBox.Ok)
+            msg.setWindowFlags(msg.windowFlags() | Qt.WindowStaysOnTopHint)
+            msg.show()
+            msg.raise_()
+            msg.activateWindow()
+            logger.info("Показано уведомление о новых вакансиях")
+
+    def closeEvent(self, event):
+        """Переопределение события закрытия окна"""
+        logger.info("closeEvent вызвано")  # Диагностика: проверяем, вызывается ли метод
+        if self.tray_icon:
+            logger.info(f"isVisible в closeEvent: {self.tray_icon.isVisible()}")  # Диагностика: значение isVisible()
+            self.hide()  # Скрываем окно вместо закрытия
+            event.ignore()  # Игнорируем событие закрытия
+            self.tray_icon.showMessage(
+                "Удобные Вакансии",
+                "Приложение свернуто в системный трей. Используйте контекстное меню для выхода.",
+                QSystemTrayIcon.Information,
+                3000
+            )
+            logger.info("Окно свернуто в системный трей")
+        else:
+            logger.info("Системный трей недоступен или не инициализирован, приложение будет закрыто")
+            event.accept()
 
     def load_settings(self):
         logger.info("Загрузка настроек")
@@ -684,7 +858,7 @@ class VacancyApp(QMainWindow):
         self.exit_btn.setFixedSize(110, 40)
 
         self.update_btn.clicked.connect(self.update_vacancies)
-        self.exit_btn.clicked.connect(self.close)
+        self.exit_btn.clicked.connect(self.close_application)
         self.theme_btn.clicked.connect(self.toggle_theme)
         self.about_btn.clicked.connect(self.show_about_dialog)
 
@@ -807,6 +981,30 @@ class VacancyApp(QMainWindow):
         settings_layout.addWidget(self.russia_checkbox)
         settings_layout.addWidget(self.belarus_checkbox)
 
+        # Разделитель
+        separator3 = QFrame()
+        separator3.setFrameShape(QFrame.VLine)
+        separator3.setFrameShadow(QFrame.Sunken)
+        settings_layout.addWidget(separator3)
+
+        # Автообновление
+        self.auto_update_checkbox = QCheckBox("Автообновление")
+        self.auto_update_checkbox.setChecked(
+            self.settings.get('auto_update', {}).get('enabled', False)
+        )
+        self.auto_update_checkbox.setMinimumHeight(25)
+        settings_layout.addWidget(self.auto_update_checkbox)
+
+        self.auto_update_interval = QSpinBox()
+        self.auto_update_interval.setRange(1, 1440)  # от 1 минут до 24 часов
+        self.auto_update_interval.setValue(
+            self.settings.get('auto_update', {}).get('interval_minutes', 30)
+        )
+        self.auto_update_interval.setSuffix(" мин")
+        self.auto_update_interval.setFixedWidth(90)
+        self.auto_update_interval.setMinimumHeight(32)
+        settings_layout.addWidget(self.auto_update_interval)
+
         settings_layout.addStretch()
 
         # Кнопка сохранения
@@ -910,16 +1108,24 @@ class VacancyApp(QMainWindow):
             'belarus': self.belarus_checkbox.isChecked()
         }
 
+        # Сохраняем автообновление
+        auto_update = {
+            'enabled': self.auto_update_checkbox.isChecked(),
+            'interval_minutes': self.auto_update_interval.value()
+        }
+
         self.settings.update({
             "query": query,
             "exclude": exclude,
             "days": days,
             "work_types": work_types,
-            "countries": countries
+            "countries": countries,
+            "auto_update": auto_update
         })
 
         self.save_settings()
-        QMessageBox.information(self, "Успех", "✅ Настройки сохранены!")
+        self.setup_auto_update()  # Перезапускаем таймер с новыми настройками
+        QMessageBox.information(self, "Успех", "Настройки сохранены!")
 
     def update_table(self):
         logger.info("Обновление таблицы")
