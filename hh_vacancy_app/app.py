@@ -10,11 +10,12 @@ import requests
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QLabel, QLineEdit, QTableWidget, QTableWidgetItem,
-    QHeaderView, QMessageBox, QAbstractItemView, QCheckBox, QSpinBox,
+    QHeaderView, QMessageBox, QDialog, QAbstractItemView, QCheckBox, QSpinBox,
     QFrame, QGroupBox
 )
 from PySide6.QtCore import Qt, Signal, QObject, QThread
-from PySide6.QtGui import QDesktopServices, QColor, QPalette, QFont, QIcon
+from PySide6.QtGui import QDesktopServices, QColor, QPalette, QFont, QIcon, QPixmap
+
 
 
 def resource_path(relative_path):
@@ -52,7 +53,6 @@ DEFAULT_SETTINGS = {
         "belarus": True
     }
 }
-
 
 # Worker для фонового обновления
 class UpdateWorker(QThread):
@@ -255,7 +255,66 @@ class UpdateWorker(QThread):
         return fetched_vacancies
 
 
+class SupportDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Поддержать разработчика")
+        self.setModal(True)
+        self.resize(400, 500)
+
+        layout = QVBoxLayout(self)
+
+        # Заголовок
+        title_label = QLabel("<b>Спасибо, что пользуетесь 'Удобные Вакансии'!</b>")
+        title_label.setWordWrap(True)
+        layout.addWidget(title_label)
+
+        # Описание
+        desc_label = QLabel("Если приложение оказалось полезным, вы можете поддержать разработчика:")
+        desc_label.setWordWrap(True)
+        layout.addWidget(desc_label)
+
+        # QLabel для QR-кода
+        self.qr_label = QLabel()
+        self.qr_label.setAlignment(Qt.AlignCenter)
+
+        # Получаем путь к QR-коду
+        qr_path = resource_path("qr-code.png")
+        logger.info(f"Попытка загрузить QR-код из: {qr_path}")
+        logger.info(f"Файл существует: {os.path.exists(qr_path)}")
+
+        qr_pixmap = QPixmap(qr_path)
+        if not qr_pixmap.isNull():
+            scaled_pixmap = qr_pixmap.scaled(200, 200, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            self.qr_label.setPixmap(scaled_pixmap)
+            logger.info("QR-код успешно загружен")
+        else:
+            error_msg = f"QR-код не найден\nПуть: {qr_path}\nСуществует: {os.path.exists(qr_path)}"
+            self.qr_label.setText(error_msg)
+            self.qr_label.setStyleSheet("color: red; font-size: 10px;")
+            logger.error(f"Не удалось загрузить QR-код из {qr_path}")
+        layout.addWidget(self.qr_label)
+
+        # Текст с пояснением и ссылками
+        text_label = QLabel("""
+        <br>
+        Отсканируйте QR-код:<br><br>
+        Любая сумма приветствуется!<br><br>
+        """)
+        text_label.setTextFormat(Qt.RichText)
+        text_label.setOpenExternalLinks(True) # Позволяет открывать ссылки
+        text_label.setWordWrap(True)
+        layout.addWidget(text_label)
+
+        # Кнопка Закрыть
+        close_button = QPushButton("Закрыть")
+        close_button.clicked.connect(self.accept) # Закрывает диалог
+        layout.addWidget(close_button)
+
+    # Опционально: переопределить closeEvent, если нужно что-то сделать при закрытии
+
 class VacancyApp(QMainWindow):
+
 
     def __init__(self):
         super().__init__()
@@ -611,7 +670,14 @@ class VacancyApp(QMainWindow):
         self.about_btn = QPushButton("О программе")
         self.exit_btn = QPushButton("Выход")
 
-        self.update_btn.setFixedSize(120, 40)
+        self.support_btn = QPushButton("Поддержать")
+        # Устанавливаем фиксированный размер (по аналогии с другими кнопками)
+        self.support_btn.setFixedHeight(40)
+        # self.support_btn.setFixedSize(110, 40) # Или фиксированная ширина, если нужно
+        # Привязываем сигнал clicked к методу show_support_dialog
+        self.support_btn.clicked.connect(self.show_support_dialog)
+
+        self.update_btn.setFixedHeight(40)
         self.theme_btn.setFixedSize(110, 40)
         self.about_btn.setMinimumWidth(140)
         self.about_btn.setFixedHeight(40)
@@ -624,6 +690,7 @@ class VacancyApp(QMainWindow):
 
         buttons_layout.addWidget(self.update_btn)
         buttons_layout.addWidget(self.theme_btn)
+        buttons_layout.addWidget(self.support_btn)
         buttons_layout.addWidget(self.about_btn)
         buttons_layout.addWidget(self.exit_btn)
         header_layout.addLayout(buttons_layout)
@@ -1072,6 +1139,10 @@ class VacancyApp(QMainWindow):
         msg.setStandardButtons(QMessageBox.Ok)
         msg.exec()
 
+    def show_support_dialog(self):
+        """Открывает диалог с QR-кодом и просьбой о поддержке."""
+        dialog = SupportDialog(self)
+        dialog.exec()  # Открывает модальный диалог
 
 if __name__ == "__main__":
     logger.info("Запуск основного цикла приложения")
