@@ -5,17 +5,18 @@ import webbrowser
 import threading
 import logging
 from datetime import datetime, timedelta
+from collections import defaultdict
 
 import requests
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QLabel, QLineEdit, QTableWidget, QTableWidgetItem,
     QHeaderView, QMessageBox, QDialog, QAbstractItemView, QCheckBox, QSpinBox,
-    QFrame, QGroupBox, QSystemTrayIcon, QMenu
+    QFrame, QGroupBox, QSystemTrayIcon, QMenu, QTabWidget
 )
 from PySide6.QtCore import Qt, Signal, QObject, QThread, QTimer
-from PySide6.QtGui import QDesktopServices, QColor, QPalette, QFont, QIcon, QPixmap, QAction
-
+from PySide6.QtGui import QDesktopServices, QColor, QPalette, QFont, QIcon, QPixmap, QAction, QPainter
+from PySide6.QtCharts import QChart, QChartView, QBarSeries, QBarSet, QValueAxis, QBarCategoryAxis, QCategoryAxis
 
 
 def resource_path(relative_path):
@@ -202,6 +203,7 @@ class UpdateWorker(QThread):
         fetched_vacancies = []
         current_params = params.copy()  # Работаем с копией, чтобы не менять оригинальные параметры
         page = current_params.get('page', 0)
+        loaded_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")  # Дата и время загрузки для всех вакансий на этой странице
         while page < max_pages:
             try:
                 logger.debug(f"Запрос страницы {page + 1} с параметрами: {current_params}")
@@ -246,7 +248,8 @@ class UpdateWorker(QThread):
                         "date": date_str,
                         "link": item.get("alternate_url", "#"),
                         "schedule": schedule_name,
-                        "status": "NEW"
+                        "status": "NEW",
+                        "loaded_at": loaded_at  # Добавляем дату и время загрузки
                     })
 
                 if page >= data.get("pages", 1) - 1:
@@ -318,6 +321,17 @@ class SupportDialog(QDialog):
     # Опционально: переопределить closeEvent, если нужно что-то сделать при закрытии
 
 class VacancyApp(QMainWindow):
+
+    def parse_loaded_date(self, date_str):
+        """Парсит строку даты загрузки в datetime, с fallback на min для сортировки."""
+        if not date_str:
+            return datetime.min
+        try:
+            return datetime.strptime(date_str, "%Y-%m-%d %H:%M:%S")
+        except ValueError:
+            logger.warning(f"Неверный формат loaded_at: {date_str}")
+            return datetime.min
+
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Удобные Вакансии — HH.ru")
@@ -338,6 +352,7 @@ class VacancyApp(QMainWindow):
         self.apply_theme()
         self.load_vacancies_from_file()
         self.update_table()
+        self.update_stats_chart()  # Инициализируем график статистики
         self.setup_auto_update()
 
         # Настройка системного трея
@@ -410,14 +425,16 @@ class VacancyApp(QMainWindow):
 
     def closeEvent(self, event):
         """Переопределение события закрытия окна"""
-        if self.tray_icon and self.tray_icon.isVisible():
+        logger.info("closeEvent вызвано")  # Диагностика: проверяем, вызывается ли метод
+        if self.tray_icon:
+            logger.info(f"isVisible в closeEvent: {self.tray_icon.isVisible()}")  # Диагностика: значение isVisible()
             self.hide()  # Скрываем окно вместо закрытия
             event.ignore()  # Игнорируем событие закрытия
             self.tray_icon.showMessage(
                 "Удобные Вакансии",
                 "Приложение свернуто в системный трей. Используйте контекстное меню для выхода.",
                 QSystemTrayIcon.Information,
-                3000  # Увеличена длительность уведомления для Windows 11
+                3000
             )
             logger.info("Окно свернуто в системный трей")
         else:
@@ -436,6 +453,66 @@ class VacancyApp(QMainWindow):
             logger.info("Иконка трея скрыта")
         self.close()  # Закрываем окно
         QApplication.quit()  # Завершаем приложение
+
+    def update_stats_chart(self):
+        """Обновление графика статистики по часам загрузки вакансий"""
+        if not self.vacancies:
+            if hasattr(self, 'chart_view') and self.chart_view:
+                self.chart_view.chart().removeAllSeries()
+            return
+
+        # Группируем вакансии по часу дня (0-23)
+        hourly_counts = defaultdict(int)
+        for v in self.vacancies:
+            loaded_at_str = v.get('loaded_at', '')
+            if loaded_at_str:
+                try:
+                    loaded_dt = datetime.strptime(loaded_at_str, "%Y-%m-%d %H:%M:%S")
+                    hour = loaded_dt.hour
+                    hourly_counts[hour] += 1
+                except ValueError:
+                    logger.warning(f"Неверный формат loaded_at: {loaded_at_str}")
+
+        # Создаем график
+        chart = QChart()
+        chart.setTitle("Вакансии по часам загрузки")
+        chart.setAnimationOptions(QChart.SeriesAnimations)
+
+        # Создаем бар-сет
+        bar_set = QBarSet("Количество вакансий")
+        for hour in range(24):
+            bar_set.append(hourly_counts[hour])
+
+        # Добавляем серию
+        series = QBarSeries()
+        series.append(bar_set)
+        chart.addSeries(series)
+
+        # Оси
+        axis_x = QBarCategoryAxis()
+        categories = [str(h) + "ч" for h in range(24)]
+        axis_x.append(categories)
+        chart.addAxis(axis_x, Qt.AlignBottom)
+        series.attachAxis(axis_x)
+
+        axis_y = QValueAxis()
+        axis_y.setRange(0, max(hourly_counts.values()) + 1 if hourly_counts else 1)
+        axis_y.setTitleText("Количество")
+        chart.addAxis(axis_y, Qt.AlignLeft)
+        series.attachAxis(axis_y)
+
+        chart.setTheme(QChart.ChartThemeDark if self.settings.get("theme") == "dark" else QChart.ChartThemeLight)
+
+        # Создаем виджет графика
+        if not hasattr(self, 'chart_view') or self.chart_view is None:
+            self.chart_view = QChartView(chart)
+            self.chart_view.setRenderHint(QPainter.Antialiasing)
+            # Добавляем в UI (предполагаем, что stats_chart_frame существует, см. init_ui)
+            self.stats_chart_frame.layout().addWidget(self.chart_view)
+        else:
+            self.chart_view.setChart(chart)
+
+        logger.info("График статистики обновлен")
 
     def setup_auto_update(self):
         """Настройка автообновления"""
@@ -475,6 +552,7 @@ class VacancyApp(QMainWindow):
         self.vacancies.extend(truly_new)
         self.save_vacancies_to_file()
         self.update_table()
+        self.update_stats_chart()  # Обновляем график после добавления новых вакансий
 
         if truly_new:
             # Показываем уведомление о новых вакансиях
@@ -489,24 +567,6 @@ class VacancyApp(QMainWindow):
             msg.raise_()
             msg.activateWindow()
             logger.info("Показано уведомление о новых вакансиях")
-
-    def closeEvent(self, event):
-        """Переопределение события закрытия окна"""
-        logger.info("closeEvent вызвано")  # Диагностика: проверяем, вызывается ли метод
-        if self.tray_icon:
-            logger.info(f"isVisible в closeEvent: {self.tray_icon.isVisible()}")  # Диагностика: значение isVisible()
-            self.hide()  # Скрываем окно вместо закрытия
-            event.ignore()  # Игнорируем событие закрытия
-            self.tray_icon.showMessage(
-                "Удобные Вакансии",
-                "Приложение свернуто в системный трей. Используйте контекстное меню для выхода.",
-                QSystemTrayIcon.Information,
-                3000
-            )
-            logger.info("Окно свернуто в системный трей")
-        else:
-            logger.info("Системный трей недоступен или не инициализирован, приложение будет закрыто")
-            event.accept()
 
     def load_settings(self):
         logger.info("Загрузка настроек")
@@ -655,6 +715,11 @@ class VacancyApp(QMainWindow):
                     border-radius: 12px;
                     border: 2px solid #2D2D2D;
                 }
+                QFrame#statsChartFrame {
+                    background-color: #1E1E1E;
+                    border-radius: 12px;
+                    border: 2px solid #2D2D2D;
+                }
                 QGroupBox {
                     color: #E1E1E1;
                     border: 2px solid #3D3D3D;
@@ -667,6 +732,25 @@ class VacancyApp(QMainWindow):
                     subcontrol-origin: margin;
                     left: 12px;
                     padding: 0 5px;
+                }
+                QTabWidget::pane {
+                    border: 1px solid #3D3D3D;
+                    background-color: #1E1E1E;
+                }
+                QTabBar::tab {
+                    background-color: #2D2D2D;
+                    color: #E1E1E1;
+                    padding: 8px 16px;
+                    border-top-left-radius: 4px;
+                    border-top-right-radius: 4px;
+                }
+                QTabBar::tab:selected {
+                    background-color: #BB86FC;
+                    color: #000000;
+                }
+                QChartView {
+                    background-color: #1E1E1E;
+                    border: none;
                 }
             """)
         else:
@@ -782,6 +866,11 @@ class VacancyApp(QMainWindow):
                     border-radius: 12px;
                     border: none;
                 }
+                QFrame#statsChartFrame {
+                    background-color: #FFFFFF;
+                    border-radius: 12px;
+                    border: none;
+                }
                 QGroupBox {
                     color: #212121;
                     border: 2px solid #E0E0E0;
@@ -795,6 +884,25 @@ class VacancyApp(QMainWindow):
                     left: 12px;
                     padding: 0 5px;
                 }
+                QTabWidget::pane {
+                    border: 1px solid #E0E0E0;
+                    background-color: #FFFFFF;
+                }
+                QTabBar::tab {
+                    background-color: #FAFAFA;
+                    color: #212121;
+                    padding: 8px 16px;
+                    border-top-left-radius: 4px;
+                    border-top-right-radius: 4px;
+                }
+                QTabBar::tab:selected {
+                    background-color: #6200EE;
+                    color: #FFFFFF;
+                }
+                QChartView {
+                    background-color: #FFFFFF;
+                    border: none;
+                }
             """)
 
     def toggle_theme(self):
@@ -804,6 +912,7 @@ class VacancyApp(QMainWindow):
         self.theme_btn.setText("Темная" if self.settings["theme"] == "light" else "Светлая")
         self.apply_theme()
         self.update_table()
+        self.update_stats_chart()  # Обновляем график при смене темы
 
     def init_ui(self):
         logger.info("Инициализация UI")
@@ -876,6 +985,16 @@ class VacancyApp(QMainWindow):
         content_layout = QVBoxLayout(content_widget)
         content_layout.setContentsMargins(15, 12, 15, 12)
         content_layout.setSpacing(12)
+
+        # Создаем вкладки
+        self.tab_widget = QTabWidget()
+        self.tab_widget.setTabPosition(QTabWidget.North)
+
+        # Вкладка "Вакансии"
+        vacancies_tab = QWidget()
+        vacancies_layout = QVBoxLayout(vacancies_tab)
+        vacancies_layout.setContentsMargins(0, 0, 0, 0)
+        vacancies_layout.setSpacing(12)
 
         # Компактная статистика и настройки в одной строке
         top_row = QHBoxLayout()
@@ -1014,7 +1133,7 @@ class VacancyApp(QMainWindow):
         settings_layout.addWidget(self.save_settings_btn)
 
         top_row.addWidget(settings_card, 2)
-        content_layout.addLayout(top_row)
+        vacancies_layout.addLayout(top_row)
 
         # Строка с полем исключения
         exclude_row = QHBoxLayout()
@@ -1027,7 +1146,7 @@ class VacancyApp(QMainWindow):
         self.exclude_input.setPlaceholderText("Через запятую: Android, QA, Тестировщик...")
         self.exclude_input.setMinimumHeight(35)
         exclude_row.addWidget(self.exclude_input)
-        content_layout.addLayout(exclude_row)
+        vacancies_layout.addLayout(exclude_row)
 
         # Кнопки действий с вакансиями
         self.action_widget = QWidget()
@@ -1046,13 +1165,13 @@ class VacancyApp(QMainWindow):
         action_layout.addWidget(self.mark_btn)
         action_layout.addStretch()
         self.action_widget.hide()
-        content_layout.addWidget(self.action_widget)
+        vacancies_layout.addWidget(self.action_widget)
 
         # Таблица (занимает все оставшееся место)
         self.table = QTableWidget()
-        self.table.setColumnCount(9)
+        self.table.setColumnCount(10)  # Увеличиваем до 10 колонок
         self.table.setHorizontalHeaderLabels(
-            ["", "Статус", "Название", "Компания", "Город", "Тип работы", "Зарплата", "Дата", "Действие"])
+            ["", "Статус", "Название", "Компания", "Город", "Тип работы", "Зарплата", "Дата", "Дата загрузки", "Действие"])
 
         # Оптимизация размеров колонок
         header = self.table.horizontalHeader()
@@ -1069,8 +1188,10 @@ class VacancyApp(QMainWindow):
         header.setSectionResizeMode(6, QHeaderView.ResizeToContents)
         header.setSectionResizeMode(7, QHeaderView.Fixed)
         header.resizeSection(7, 90)
-        header.setSectionResizeMode(8, QHeaderView.Fixed)
-        header.resizeSection(8, 160)
+        header.setSectionResizeMode(8, QHeaderView.Fixed)  # Новая колонка "Дата загрузки"
+        header.resizeSection(8, 130)
+        header.setSectionResizeMode(9, QHeaderView.Fixed)  # "Действие" сдвинуто
+        header.resizeSection(9, 160)
 
         # Высота строк
         self.table.verticalHeader().setDefaultSectionSize(40)
@@ -1082,7 +1203,31 @@ class VacancyApp(QMainWindow):
         self.table.cellClicked.connect(self.on_cell_click)
         self.table.setShowGrid(False)
 
-        content_layout.addWidget(self.table)
+        vacancies_layout.addWidget(self.table)
+        self.tab_widget.addTab(vacancies_tab, "Вакансии")
+
+        # Вкладка "Статистика"
+        stats_tab = QWidget()
+        stats_layout = QVBoxLayout(stats_tab)
+        stats_layout.setContentsMargins(15, 12, 15, 12)
+        stats_layout.setSpacing(12)
+
+        # Раздел статистики с графиком
+        self.stats_chart_frame = QFrame()
+        self.stats_chart_frame.setObjectName("statsChartFrame")
+        self.stats_chart_frame.setFixedHeight(300)
+        chart_layout = QVBoxLayout(self.stats_chart_frame)
+        chart_layout.setContentsMargins(20, 12, 20, 12)
+        chart_title = QLabel("Статистика загрузки вакансий по часам")
+        chart_title.setAlignment(Qt.AlignCenter)
+        chart_title.setStyleSheet("font-weight: bold; font-size: 14px;")
+        chart_layout.addWidget(chart_title)
+        self.chart_view = None  # Инициализируем здесь, обновим в update_stats_chart
+        chart_layout.addWidget(QLabel("График будет отображаться после загрузки вакансий"))  # Плейсхолдер
+        stats_layout.addWidget(self.stats_chart_frame)
+        self.tab_widget.addTab(stats_tab, "Статистика")
+
+        content_layout.addWidget(self.tab_widget)
 
         main_layout.addWidget(content_widget)
 
@@ -1138,9 +1283,17 @@ class VacancyApp(QMainWindow):
         else:
             self.action_widget.hide()
 
-        # Сортировка
-        sorted_vacancies = sorted(self.vacancies, key=lambda x: x.get('date', '') or '0000-00-00', reverse=True)
+        # Сортировка: сначала по дате загрузки (descending), затем по статусу (NEW первыми)
+        sorted_vacancies = sorted(self.vacancies, key=lambda x: self.parse_loaded_date(x.get('loaded_at', '')),
+                                  reverse=True)
         sorted_vacancies.sort(key=lambda x: 0 if x.get('status') == 'NEW' else 1)
+
+        # Очистка старых чекбоксов
+        for row in range(self.table.rowCount()):
+            widget = self.table.cellWidget(row, 0)
+            if widget:
+                self.table.removeCellWidget(row, 0)
+                widget.deleteLater()
 
         self.table.setRowCount(len(sorted_vacancies))
 
@@ -1188,9 +1341,10 @@ class VacancyApp(QMainWindow):
             self.table.setItem(row, 5, schedule_item)
 
             self.table.setItem(row, 6, QTableWidgetItem(v.get('salary', '-')))
-            self.table.setItem(row, 7, QTableWidgetItem(v.get('date', '-')))
+            self.table.setItem(row, 7, QTableWidgetItem(v.get('date', '-')))  # Дата публикации
+            self.table.setItem(row, 8, QTableWidgetItem(v.get('loaded_at', '-')))  # Дата загрузки
 
-            # Кнопка "Открыть"
+            # Кнопка "Открыть" (сдвинута на колонку 9)
             open_item = QTableWidgetItem("🔗 Открыть")
             open_item.setData(Qt.UserRole, v.get('link', ''))
             open_item.setTextAlignment(Qt.AlignCenter)
@@ -1198,12 +1352,12 @@ class VacancyApp(QMainWindow):
             font = open_item.font()
             font.setBold(True)
             open_item.setFont(font)
-            self.table.setItem(row, 8, open_item)
+            self.table.setItem(row, 9, open_item)
 
         logger.info("Таблица обновлена")
 
     def on_cell_click(self, row, column):
-        if column == 8:  # Столбец "Действие"
+        if column == 9:  # Столбец "Действие" сдвинут на 9
             item = self.table.item(row, column)
             if item:
                 link = item.data(Qt.UserRole)
@@ -1255,6 +1409,7 @@ class VacancyApp(QMainWindow):
         # Сохраняем общий файл (worker уже сохранял, но сохраняем для синхронизации)
         self.save_vacancies_to_file()
         self.update_table()
+        self.update_stats_chart()  # Обновляем график после обновления
 
         self.update_btn.setEnabled(True)
         self.update_btn.setText("🔄 Обновить")
@@ -1301,7 +1456,7 @@ class VacancyApp(QMainWindow):
         for row in range(self.table.rowCount()):
             checkbox = self.table.cellWidget(row, 0)
             if checkbox and checkbox.isChecked():
-                link_item = self.table.item(row, 8)  # столбец с действием содержит ссылку в UserRole
+                link_item = self.table.item(row, 9)  # столбец с действием сдвинут на 9
                 link = link_item.data(Qt.UserRole) if link_item else ""
                 if link:
                     for v in self.vacancies:
@@ -1313,6 +1468,7 @@ class VacancyApp(QMainWindow):
         if updated > 0:
             self.save_vacancies_to_file()
             self.update_table()
+            self.update_stats_chart()  # Обновляем график после изменения статуса
             msg = QMessageBox(self)
             msg.setIcon(QMessageBox.Information)
             msg.setWindowTitle("Успех")
