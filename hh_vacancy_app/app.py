@@ -46,6 +46,7 @@ TOKEN_FILE = data_dir / "auth.json"
 
 AUTH_BASE_URL = os.getenv("AUTH_SERVICE_URL", "https://api.subscriptionhhapp.ru").rstrip("/")
 VACANCY_BASE_URL = os.getenv("VACANCY_SERVICE_URL", "http://103.71.21.122:8081").rstrip("/")
+BOT_USERNAME = os.getenv("TELEGRAM_BOT_USERNAME", "hhsubscription_bot")
 
 # Настройка логирования
 try:
@@ -206,6 +207,56 @@ class TelegramAuthDialog(QDialog):
             logger.warning(f"Ошибка проверки статуса: {e}")
 
 
+class SubscriptionPayDialog(QDialog):
+    def __init__(self, bot_username, parent=None):
+        super().__init__(parent)
+        self.bot_username = bot_username
+        self.setWindowTitle("Продление подписки")
+        self.setModal(True)
+        self.resize(420, 260)
+
+        layout = QVBoxLayout(self)
+        title = QLabel("Подписка не активна")
+        title.setStyleSheet("font-weight: bold; font-size: 14px;")
+        layout.addWidget(title)
+
+        info = QLabel(
+            "Для продолжения работы оформите подписку в Telegram-боте.\n"
+            "Выберите тариф ниже:"
+        )
+        info.setWordWrap(True)
+        layout.addWidget(info)
+
+        buttons = QHBoxLayout()
+        btn_month = QPushButton("Месяц")
+        btn_year = QPushButton("Год")
+        btn_life = QPushButton("Навсегда")
+
+        btn_month.clicked.connect(lambda: self.open_plan("monthly"))
+        btn_year.clicked.connect(lambda: self.open_plan("yearly"))
+        btn_life.clicked.connect(lambda: self.open_plan("lifetime"))
+
+        buttons.addWidget(btn_month)
+        buttons.addWidget(btn_year)
+        buttons.addWidget(btn_life)
+        layout.addLayout(buttons)
+
+        open_bot_btn = QPushButton("Открыть бота")
+        open_bot_btn.clicked.connect(self.open_bot)
+        layout.addWidget(open_bot_btn)
+
+        close_btn = QPushButton("Закрыть")
+        close_btn.clicked.connect(self.accept)
+        layout.addWidget(close_btn)
+
+    def open_plan(self, plan):
+        link = f"https://t.me/{self.bot_username}?start=sub_{plan}"
+        webbrowser.open(link)
+
+    def open_bot(self):
+        webbrowser.open(f"https://t.me/{self.bot_username}")
+
+
 DEFAULT_SETTINGS = {
     "query": "Java разработчик",
     "exclude": "Android, QA, Тестировщик, Аналитик, C#, архитектор, PHP, Fullstack, 1С, Python, Frontend-разработчик",
@@ -355,7 +406,9 @@ class VacancyApp(QMainWindow):
         self.api = ApiClient(AUTH_BASE_URL, VACANCY_BASE_URL)
         self.token = None
         self.subscription_active = False
+        self.subscription_status = None
         self.user_telegram_id = None
+        self.pay_dialog_shown = False
         if not self.authenticate():
             sys.exit(0)
         self.load_settings()
@@ -437,6 +490,7 @@ class VacancyApp(QMainWindow):
             status = self.api.get_subscription_status()
             if status:
                 self.token = token
+                self.subscription_status = status
                 self.subscription_active = bool(status.get("active"))
                 self.user_telegram_id = status.get("telegramId")
                 return True
@@ -451,6 +505,7 @@ class VacancyApp(QMainWindow):
 
         status = self.api.get_subscription_status()
         if status:
+            self.subscription_status = status
             self.subscription_active = bool(status.get("active"))
             self.user_telegram_id = status.get("telegramId")
         else:
@@ -477,12 +532,40 @@ class VacancyApp(QMainWindow):
         for control in controls:
             control.setEnabled(enabled)
 
+        self.pay_btn.setEnabled(True)
+
         if not enabled:
             QMessageBox.information(
                 self,
                 "Подписка не активна",
                 "Подписка не активна. Доступ к вакансиям и настройкам ограничен."
             )
+            if not self.pay_dialog_shown:
+                self.pay_dialog_shown = True
+                self.open_payment_dialog()
+
+        self.update_subscription_status_ui()
+
+    def update_subscription_status_ui(self):
+        if not self.subscription_status:
+            self.sub_status_label.setText("Подписка: неизвестно")
+            self.sub_plan_label.setText("")
+            return
+
+        active = bool(self.subscription_status.get("active"))
+        days = self.subscription_status.get("daysRemaining")
+        plan = self.subscription_status.get("subscriptionPlan") or "—"
+
+        if active:
+            self.sub_status_label.setText(f"Подписка активна (осталось {days} дн.)")
+        else:
+            self.sub_status_label.setText("Подписка не активна")
+
+        self.sub_plan_label.setText(f"Тариф: {plan}")
+
+    def open_payment_dialog(self):
+        dialog = SubscriptionPayDialog(BOT_USERNAME, self)
+        dialog.exec()
 
     def show_and_restore(self):
         """Показать и восстановить окно"""
@@ -1212,8 +1295,18 @@ class VacancyApp(QMainWindow):
         header_layout.addLayout(title_layout)
         header_layout.addStretch()
 
+        status_layout = QVBoxLayout()
+        self.sub_status_label = QLabel("Подписка: неизвестно")
+        self.sub_status_label.setStyleSheet("color: white; font-size: 12px;")
+        self.sub_plan_label = QLabel("")
+        self.sub_plan_label.setStyleSheet("color: rgba(255, 255, 255, 0.8); font-size: 11px;")
+        status_layout.addWidget(self.sub_status_label)
+        status_layout.addWidget(self.sub_plan_label)
+        header_layout.addLayout(status_layout)
+
         buttons_layout = QHBoxLayout()
         self.update_btn = QPushButton("Обновить")
+        self.pay_btn = QPushButton("Продлить")
         self.theme_btn = QPushButton("Темная" if self.settings.get("theme") == "light" else "Светлая")
         self.about_btn = QPushButton("О программе")
         self.exit_btn = QPushButton("Выход")
@@ -1223,17 +1316,20 @@ class VacancyApp(QMainWindow):
         self.support_btn.clicked.connect(self.show_support_dialog)
 
         self.update_btn.setFixedHeight(40)
+        self.pay_btn.setFixedHeight(40)
         self.theme_btn.setFixedSize(110, 40)
         self.about_btn.setMinimumWidth(140)
         self.about_btn.setFixedHeight(40)
         self.exit_btn.setFixedSize(110, 40)
 
         self.update_btn.clicked.connect(self.update_vacancies)
+        self.pay_btn.clicked.connect(self.open_payment_dialog)
         self.exit_btn.clicked.connect(self.close_application)
         self.theme_btn.clicked.connect(self.toggle_theme)
         self.about_btn.clicked.connect(self.show_about_dialog)
 
         buttons_layout.addWidget(self.update_btn)
+        buttons_layout.addWidget(self.pay_btn)
         buttons_layout.addWidget(self.theme_btn)
         buttons_layout.addWidget(self.support_btn)
         buttons_layout.addWidget(self.about_btn)
