@@ -7,6 +7,7 @@ import threading
 import logging
 from datetime import datetime, timedelta
 from collections import defaultdict
+import uuid
 
 import requests
 from PySide6.QtWidgets import (
@@ -18,10 +19,6 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, Signal, QObject, QThread, QTimer
 from PySide6.QtGui import QDesktopServices, QColor, QPalette, QFont, QIcon, QPixmap, QAction, QPainter
 from PySide6.QtCharts import QChart, QChartView, QBarSeries, QBarSet, QValueAxis, QBarCategoryAxis, QCategoryAxis
-from tinydb import TinyDB, Query
-
-
-
 # Сразу после всех импортов добавьте:
 print("=" * 50)
 print("СТАРТ ПРОГРАММЫ")
@@ -45,10 +42,10 @@ def get_data_dir():
 
 data_dir = get_data_dir()
 LOG_FILE = data_dir / "app.log"  # Для лога
-DB_FILE = data_dir / "app.db"
-db = TinyDB(DB_FILE, ensure_ascii=False, indent=2, encoding='utf-8')
-Vacancy = Query()
-Setting = Query()
+TOKEN_FILE = data_dir / "auth.json"
+
+AUTH_BASE_URL = os.getenv("AUTH_SERVICE_URL", "https://api.subscriptionhhapp.ru").rstrip("/")
+VACANCY_BASE_URL = os.getenv("VACANCY_SERVICE_URL", "http://103.71.21.122:8081").rstrip("/")
 
 # Настройка логирования
 try:
@@ -72,6 +69,143 @@ except Exception as e:
     # Добавьте: logger не используется здесь, так что OK
 
 
+class ApiClient:
+    def __init__(self, auth_base_url, vacancy_base_url):
+        self.auth_base_url = auth_base_url.rstrip("/")
+        self.vacancy_base_url = vacancy_base_url.rstrip("/")
+        self.session = requests.Session()
+
+    def set_token(self, token):
+        self.session.headers.update({"Authorization": f"Bearer {token}"})
+
+    def create_auth_session(self, device_id):
+        resp = requests.post(
+            f"{self.auth_base_url}/api/telegram-auth/create-session",
+            json={"deviceId": device_id},
+            timeout=10
+        )
+        resp.raise_for_status()
+        return resp.json()
+
+    def check_auth_status(self, session_id, device_id):
+        params = {"deviceId": device_id} if device_id else {}
+        resp = requests.get(
+            f"{self.auth_base_url}/api/telegram-auth/status/{session_id}",
+            params=params,
+            timeout=10
+        )
+        resp.raise_for_status()
+        return resp.json()
+
+    def get_subscription_status(self):
+        resp = self.session.get(f"{self.auth_base_url}/api/subscription/status", timeout=10)
+        if resp.status_code == 401:
+            return None
+        resp.raise_for_status()
+        return resp.json()
+
+    def get_settings(self):
+        resp = self.session.get(f"{self.vacancy_base_url}/api/settings", timeout=10)
+        resp.raise_for_status()
+        return resp.json()
+
+    def update_settings(self, payload):
+        resp = self.session.put(f"{self.vacancy_base_url}/api/settings", json=payload, timeout=10)
+        resp.raise_for_status()
+        return resp.json()
+
+    def search_vacancies(self, payload):
+        resp = self.session.post(f"{self.vacancy_base_url}/api/vacancies/search", json=payload, timeout=30)
+        resp.raise_for_status()
+        return resp.json()
+
+    def get_vacancies(self, status=None):
+        params = {"status": status} if status else {}
+        resp = self.session.get(f"{self.vacancy_base_url}/api/vacancies", params=params, timeout=10)
+        resp.raise_for_status()
+        return resp.json()
+
+    def mark_multiple_viewed(self, vacancy_ids):
+        resp = self.session.post(
+            f"{self.vacancy_base_url}/api/vacancies/mark-multiple-viewed",
+            json=vacancy_ids,
+            timeout=10
+        )
+        resp.raise_for_status()
+
+
+class TelegramAuthDialog(QDialog):
+    def __init__(self, api_client, parent=None):
+        super().__init__(parent)
+        self.api_client = api_client
+        self.token = None
+        self.session_id = None
+        self.device_id = None
+        self.timer = QTimer(self)
+        self.timer.timeout.connect(self.poll_status)
+
+        self.setWindowTitle("Авторизация через Telegram")
+        self.setModal(True)
+        self.resize(420, 260)
+
+        layout = QVBoxLayout(self)
+        self.status_label = QLabel("Создаем сессию авторизации...")
+        self.status_label.setWordWrap(True)
+        layout.addWidget(self.status_label)
+
+        self.link_label = QLabel("")
+        self.link_label.setWordWrap(True)
+        layout.addWidget(self.link_label)
+
+        self.open_btn = QPushButton("Открыть Telegram")
+        self.open_btn.clicked.connect(self.open_telegram)
+        self.open_btn.setEnabled(False)
+        layout.addWidget(self.open_btn)
+
+        self.cancel_btn = QPushButton("Отмена")
+        self.cancel_btn.clicked.connect(self.reject)
+        layout.addWidget(self.cancel_btn)
+
+        self.start_auth()
+
+    def start_auth(self):
+        try:
+            self.device_id = f"desktop-{uuid.uuid4().hex[:8]}"
+            session = self.api_client.create_auth_session(self.device_id)
+            self.session_id = session.get("sessionId")
+
+            safe_device = self.device_id.replace("_", "-")
+            deep_link = f"https://t.me/hhsubscription_bot?start=auth_{self.session_id}_{safe_device}"
+            self.link_label.setText(f"Ссылка для входа:\n{deep_link}")
+            self.open_btn.setEnabled(True)
+            self.status_label.setText("Ожидаем подтверждение в Telegram...")
+
+            self.timer.start(2000)
+        except Exception as e:
+            self.status_label.setText(f"Ошибка авторизации: {e}")
+
+    def open_telegram(self):
+        if self.link_label.text():
+            link = self.link_label.text().split("\n")[-1].strip()
+            webbrowser.open(link)
+
+    def poll_status(self):
+        try:
+            status = self.api_client.check_auth_status(self.session_id, self.device_id)
+            status_value = status.get("status")
+            token = status.get("token") or status.get("jwtToken")
+
+            if status_value == "COMPLETED" and token:
+                self.token = token
+                self.timer.stop()
+                self.accept()
+            elif status_value in ("EXPIRED", "NOT_FOUND", "INVALID_DEVICE", "ERROR"):
+                self.timer.stop()
+                self.status_label.setText(status.get("message") or "Сессия истекла")
+        except Exception as e:
+            logger.warning(f"Ошибка проверки статуса: {e}")
+
+
 DEFAULT_SETTINGS = {
     "query": "Java разработчик",
     "exclude": "Android, QA, Тестировщик, Аналитик, C#, архитектор, PHP, Fullstack, 1С, Python, Frontend-разработчик",
@@ -90,191 +224,46 @@ DEFAULT_SETTINGS = {
         "enabled": False,
         "interval_minutes": 30
     },
+    "telegram_notify": False,
     "stats_mode": "Вакансии по часам (за день)",
     "stats_date": None
 }
 
 # Worker для фонового обновления
 class UpdateWorker(QThread):
-    finished = Signal(list)
+    finished = Signal(list, int)
     error = Signal(str)
 
-    def __init__(self, settings, old_links):
+    def __init__(self, auth_token, search_payload, existing_ids):
         super().__init__()
-        self.settings = settings
-        self.old_links = old_links  # set of existing links
+        self.auth_token = auth_token
+        self.search_payload = search_payload
+        self.existing_ids = existing_ids
 
     def run(self):
         try:
-            logger.info("Фоновый поток: начало получения вакансий")
-            new_vacancies = self.get_vacancies_from_api()
-            truly_new = [v for v in new_vacancies if v['link'] not in self.old_links]
-            logger.info(f"Найдено {len(truly_new)} новых вакансий")
-            self.finished.emit(truly_new)
+            headers = {"Authorization": f"Bearer {self.auth_token}"}
+            search_resp = requests.post(
+                f"{VACANCY_BASE_URL}/api/vacancies/search",
+                json=self.search_payload,
+                headers=headers,
+                timeout=30
+            )
+            search_resp.raise_for_status()
+
+            list_resp = requests.get(
+                f"{VACANCY_BASE_URL}/api/vacancies",
+                headers=headers,
+                timeout=15
+            )
+            list_resp.raise_for_status()
+
+            vacancies = list_resp.json()
+            new_count = sum(1 for v in vacancies if v.get("id") not in self.existing_ids)
+            self.finished.emit(vacancies, new_count)
         except Exception as e:
             logger.exception("Ошибка в фоновом потоке")
             self.error.emit(str(e))
-
-    def get_vacancies_from_api(self):
-        date_from = (datetime.now() - timedelta(days=int(self.settings['days']))).strftime("%Y-%m-%dT%H:%M:%S")
-        exclude_list = [w.strip() for w in self.settings['exclude'].split(',') if w.strip()]
-        exclude_str = " NOT ".join(exclude_list)
-        search_text = f"{self.settings['query']} NOT {exclude_str}" if exclude_str else self.settings['query']
-        logger.debug(f"Поисковый запрос: {search_text}")
-
-        # Определяем типы работы
-        work_types = self.settings.get('work_types', {})
-        schedules = []
-        if work_types.get('remote'):
-            schedules.append('remote')
-        if work_types.get('hybrid'):
-            schedules.append('hybrid')
-        if work_types.get('office'):
-            schedules.append('fullDay')
-
-        # Определяем страны
-        countries = self.settings.get('countries', {})
-        areas = []
-        if countries.get('russia'):
-            areas.append(113)  # Россия
-        if countries.get('belarus'):
-            areas.append(16)  # Беларусь
-
-        # Базовые параметры
-        base_params = {
-            "text": search_text,
-            "per_page": 50,
-            "page": 0,
-            "date_from": date_from,
-            "professional_role": 96
-        }
-
-        logger.debug(f"Выбранные типы работы: {schedules}")
-        logger.debug(f"Выбранные страны: {areas}")
-
-        vacancies = []
-        API_URL = "https://api.hh.ru/vacancies"
-        max_pages = 5
-
-        # --- КЛЮЧЕВОЕ ИЗМЕНЕНИЕ ---
-        # Определяем, нужно ли использовать фильтр по schedule
-        use_schedule_filter = True
-        # Если выбраны ВСЕ типы работы, не используем фильтр schedule
-        if len(schedules) == 3 and 'remote' in schedules and 'hybrid' in schedules and 'fullDay' in schedules:
-            logger.info("Выбраны все типы работы. Фильтр 'schedule' будет пропущен.")
-            use_schedule_filter = False
-
-        # --- КЛЮЧЕВОЕ ИЗМЕНЕНИЕ ---
-        # Если фильтр schedule используется, но выбрано несколько значений,
-        # нужно выполнить отдельные запросы для каждого значения.
-        if use_schedule_filter and len(schedules) > 1:
-            logger.info(f"Выбрано несколько типов работы ({schedules}). Выполняем отдельные запросы.")
-            all_vacancies_aggregated = []
-            for single_schedule in schedules:
-                logger.debug(f"Запрашиваем вакансии для типа работы: {single_schedule}")
-                # Создаем параметры для текущего типа работы
-                current_params = base_params.copy()
-                current_params['schedule'] = single_schedule
-                if areas:  # Добавляем регионы, если они заданы
-                    current_params['area'] = areas  # Передаем список регионов
-
-                # Выполняем поиск для одного типа работы
-                schedule_vacancies = self._fetch_vacancies(API_URL, current_params, max_pages)
-                all_vacancies_aggregated.extend(schedule_vacancies)
-            # Убираем дубликаты вакансий, которые могли быть найдены по разным типам работы
-            seen_links = set()
-            unique_vacancies = []
-            for v in all_vacancies_aggregated:
-                if v['link'] not in seen_links:
-                    seen_links.add(v['link'])
-                    unique_vacancies.append(v)
-            vacancies = unique_vacancies
-
-        # --- КЛЮЧЕВОЕ ИЗМЕНЕНИЕ ---
-        # Если фильтр schedule используется, но выбрано ОДНО значение
-        elif use_schedule_filter and len(schedules) == 1:
-            logger.info(f"Выбран один тип работы: {schedules[0]}. Выполняем обычный запрос.")
-            current_params = base_params.copy()
-            current_params['schedule'] = schedules[0]
-            if areas:
-                current_params['area'] = areas
-            vacancies = self._fetch_vacancies(API_URL, current_params, max_pages)
-
-        # --- КЛЮЧЕВОЕ ИЗМЕНЕНИЕ ---
-        # Если фильтр schedule НЕ используется (выбраны все)
-        else:  # not use_schedule_filter
-            logger.info("Фильтр 'schedule' пропущен. Выполняем запрос без него.")
-            current_params = base_params.copy()
-            if areas:
-                current_params['area'] = areas
-            vacancies = self._fetch_vacancies(API_URL, current_params, max_pages)
-
-        logger.info(f"Получено {len(vacancies)} уникальных вакансий с API (после объединения/фильтрации)")
-        return vacancies
-
-    # --- ВСПОМОГАТЕЛЬНЫЙ МЕТОД ---
-    def _fetch_vacancies(self, api_url, params, max_pages):
-        """Вспомогательный метод для выполнения запросов к API с заданными параметрами."""
-        fetched_vacancies = []
-        current_params = params.copy()  # Работаем с копией, чтобы не менять оригинальные параметры
-        page = current_params.get('page', 0)
-        loaded_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")  # Дата и время загрузки для всех вакансий на этой странице
-        while page < max_pages:
-            try:
-                logger.debug(f"Запрос страницы {page + 1} с параметрами: {current_params}")
-
-                resp = requests.get(api_url, params=current_params, timeout=10)
-                if resp.status_code != 200:
-                    logger.warning(f"API вернул статус {resp.status_code} для параметров: {current_params}")
-                    if resp.status_code == 400:
-                        logger.error("Возможно, неверные параметры запроса. Проверьте логи выше.")
-                    break
-                data = resp.json()
-                items = data.get("items", [])
-                logger.debug(f"Получено {len(items)} вакансий на странице {page + 1}")
-
-                for item in items:
-                    salary_info = item.get("salary")
-                    if salary_info:
-                        s_from = salary_info.get('from') or ''
-                        s_to = salary_info.get('to') or ''
-                        curr = salary_info.get('currency') or ''
-                        salary_parts = []
-                        if s_from: salary_parts.append(str(s_from))
-                        if s_to: salary_parts.append(str(s_to))
-                        salary = " - ".join(salary_parts)
-                        if curr: salary += f" {curr}"
-                        if not salary: salary = "не указана"
-                    else:
-                        salary = "не указана"
-
-                    raw_date = item.get("published_at")
-                    date_str = raw_date[:10] if isinstance(raw_date, str) and len(raw_date) >= 10 else ''
-
-                    # Определяем тип работы
-                    schedule = item.get("schedule", {})
-                    schedule_name = schedule.get("name", "-") if isinstance(schedule, dict) else str(schedule)
-
-                    fetched_vacancies.append({
-                        "title": item.get("name", "-"),
-                        "company": item.get("employer", {}).get("name", "-"),
-                        "city": item.get("area", {}).get("name", "-"),
-                        "salary": salary,
-                        "date": date_str,
-                        "link": item.get("alternate_url", "#"),
-                        "schedule": schedule_name,
-                        "status": "NEW",
-                        "loaded_at": loaded_at  # Добавляем дату и время загрузки
-                    })
-
-                if page >= data.get("pages", 1) - 1:
-                    break
-                page += 1
-                current_params['page'] = page  # Увеличиваем номер страницы в копии параметров
-            except Exception as e:
-                logger.error(f"Ошибка при получении данных на странице {page} с параметрами {current_params}: {e}")
-                break
-        return fetched_vacancies
 
 
 class SupportDialog(QDialog):
@@ -363,6 +352,12 @@ class VacancyApp(QMainWindow):
         self.auto_update_timer.timeout.connect(self.auto_update_check)
         logger.info("Запуск приложения")
         # print(f"DEBUG: DATA_FILE = {DATA_FILE}")
+        self.api = ApiClient(AUTH_BASE_URL, VACANCY_BASE_URL)
+        self.token = None
+        self.subscription_active = False
+        self.user_telegram_id = None
+        if not self.authenticate():
+            sys.exit(0)
         self.load_settings()
         self.init_ui()  # Сначала создаём UI
         self.apply_theme()
@@ -372,6 +367,10 @@ class VacancyApp(QMainWindow):
         self.update_table()
         self.update_stats_chart()
         self.setup_auto_update()
+        self.apply_subscription_state()
+
+        if self.subscription_active:
+            self.update_vacancies()
 
         self.tray_icon = None
         self.setup_system_tray()
@@ -417,6 +416,73 @@ class VacancyApp(QMainWindow):
             logger.info("Иконка системного трея успешно отображается")
         else:
             logger.error("Иконка системного трея не отображается, проверьте настройки Windows 11")
+
+    def load_token(self):
+        if not TOKEN_FILE.exists():
+            return None
+        try:
+            data = json.loads(TOKEN_FILE.read_text(encoding="utf-8"))
+            return data.get("token")
+        except Exception as e:
+            logger.warning(f"Не удалось прочитать токен: {e}")
+            return None
+
+    def save_token(self, token):
+        TOKEN_FILE.write_text(json.dumps({"token": token}), encoding="utf-8")
+
+    def authenticate(self):
+        token = self.load_token()
+        if token:
+            self.api.set_token(token)
+            status = self.api.get_subscription_status()
+            if status:
+                self.token = token
+                self.subscription_active = bool(status.get("active"))
+                self.user_telegram_id = status.get("telegramId")
+                return True
+
+        dialog = TelegramAuthDialog(self.api, self)
+        if dialog.exec() != QDialog.Accepted or not dialog.token:
+            return False
+
+        self.token = dialog.token
+        self.api.set_token(self.token)
+        self.save_token(self.token)
+
+        status = self.api.get_subscription_status()
+        if status:
+            self.subscription_active = bool(status.get("active"))
+            self.user_telegram_id = status.get("telegramId")
+        else:
+            self.subscription_active = False
+        return True
+
+    def apply_subscription_state(self):
+        enabled = self.subscription_active
+        controls = [
+            self.query_input,
+            self.days_input,
+            self.remote_checkbox,
+            self.hybrid_checkbox,
+            self.office_checkbox,
+            self.russia_checkbox,
+            self.belarus_checkbox,
+            self.auto_update_checkbox,
+            self.auto_update_interval,
+            self.telegram_notify_checkbox,
+            self.save_settings_btn,
+            self.exclude_input,
+            self.update_btn
+        ]
+        for control in controls:
+            control.setEnabled(enabled)
+
+        if not enabled:
+            QMessageBox.information(
+                self,
+                "Подписка не активна",
+                "Подписка не активна. Доступ к вакансиям и настройкам ограничен."
+            )
 
     def show_and_restore(self):
         """Показать и восстановить окно"""
@@ -643,6 +709,9 @@ class VacancyApp(QMainWindow):
 
     def setup_auto_update(self):
         """Настройка автообновления"""
+        if not self.subscription_active:
+            self.auto_update_timer.stop()
+            return
         auto_update_settings = self.settings.get('auto_update', {})
         enabled = auto_update_settings.get('enabled', False)
         interval = auto_update_settings.get('interval_minutes', 30)
@@ -661,31 +730,29 @@ class VacancyApp(QMainWindow):
         if self.worker and self.worker.isRunning():
             logger.info("Обновление уже выполняется, пропускаем")
             return
-        old_links = {v['link'] for v in self.vacancies}
-        self.worker = UpdateWorker(self.settings.copy(), old_links)  # ← передаём old_links
-        self.worker.finished.connect(self.on_auto_update_finished)
+        if not self.subscription_active:
+            return
+        old_ids = {v['id'] for v in self.vacancies if v.get("id")}
+        search_payload = self.build_search_payload()
+        self.worker = UpdateWorker(self.token, search_payload, old_ids)
+        self.worker.finished.connect(self.on_auto_update_finished_with_server)
         self.worker.error.connect(self.on_update_error)
         self.worker.start()
 
-    def on_auto_update_finished(self, truly_new):
+    def on_auto_update_finished_with_server(self, server_vacancies, new_count):
         """Обработка результатов автообновления"""
-        logger.info(f"Автообновление завершено: {len(truly_new)} новых вакансий")
+        logger.info(f"Автообновление завершено: {new_count} новых вакансий")
 
-        for v in truly_new:
-            if 'status' not in v:
-                v['status'] = 'NEW'
-
-        self.vacancies.extend(truly_new)
-        self.save_vacancies_to_file()
+        self.vacancies = [self.normalize_vacancy(v) for v in server_vacancies]
         self.populate_stats_dates()
         self.update_table()
         self.update_stats_chart()
 
-        if truly_new:
+        if new_count:
             msg = QMessageBox(self)
             msg.setIcon(QMessageBox.Information)
             msg.setWindowTitle("Новые вакансии!")
-            msg.setText(f"Найдено {len(truly_new)} новых вакансий!")
+            msg.setText(f"Найдено {new_count} новых вакансий!")
             msg.setInformativeText("Проверьте таблицу для просмотра деталей.")
             msg.setStandardButtons(QMessageBox.Ok)
             msg.setWindowFlags(msg.windowFlags() | Qt.WindowStaysOnTopHint)
@@ -695,32 +762,75 @@ class VacancyApp(QMainWindow):
             logger.info("Показано уведомление о новых вакансиях")
 
     def load_settings(self):
-        logger.info("Загрузка настроек из TinyDB")
-        settings_table = db.table('settings')
-        records = settings_table.all()
-        if records:
-            self.settings = records[0]
-            # Убедимся, что все ключи из DEFAULT_SETTINGS присутствуют
-            for key, default_val in DEFAULT_SETTINGS.items():
-                if key not in self.settings:
-                    self.settings[key] = default_val
-            if 'work_types' not in self.settings:
-                self.settings['work_types'] = DEFAULT_SETTINGS['work_types'].copy()
-            if 'countries' not in self.settings:
-                self.settings['countries'] = DEFAULT_SETTINGS['countries'].copy()
-            if 'stats_date' not in self.settings:
-                self.settings['stats_date'] = None
-            logger.info("Настройки загружены из базы")
-        else:
+        if not self.subscription_active:
             self.settings = DEFAULT_SETTINGS.copy()
-            logger.info("Используются настройки по умолчанию")
+            return
+
+        try:
+            server_settings = self.api.get_settings()
+            self.user_telegram_id = server_settings.get("telegramId")
+
+            work_types = set(server_settings.get("workTypes") or [])
+            countries = set(server_settings.get("countries") or [])
+
+            self.settings = {
+                "query": server_settings.get("searchQuery") or DEFAULT_SETTINGS["query"],
+                "exclude": server_settings.get("excludeKeywords") or "",
+                "days": server_settings.get("days") or 1,
+                "work_types": {
+                    "remote": "remote" in work_types,
+                    "hybrid": "hybrid" in work_types,
+                    "office": "office" in work_types,
+                },
+                "countries": {
+                    "russia": "russia" in countries,
+                    "belarus": "belarus" in countries,
+                },
+                "auto_update": {
+                    "enabled": bool(server_settings.get("autoUpdateEnabled")),
+                    "interval_minutes": server_settings.get("autoUpdateInterval") or 30
+                },
+                "telegram_notify": bool(server_settings.get("telegramNotify")),
+                "theme": server_settings.get("theme") or "light",
+                "stats_mode": self.settings.get("stats_mode", DEFAULT_SETTINGS["stats_mode"]) if hasattr(self, "settings") else DEFAULT_SETTINGS["stats_mode"],
+                "stats_date": self.settings.get("stats_date") if hasattr(self, "settings") else None
+            }
+        except Exception as e:
+            logger.error(f"Ошибка загрузки настроек с сервера: {e}")
+            self.settings = DEFAULT_SETTINGS.copy()
 
     def save_settings(self):
-        logger.info("Сохранение настроек в TinyDB")
-        settings_table = db.table('settings')
-        settings_table.truncate()
-        settings_table.insert(self.settings)
-        logger.info("Настройки сохранены")
+        if not self.subscription_active:
+            return
+
+        work_types = []
+        if self.settings.get("work_types", {}).get("remote"):
+            work_types.append("remote")
+        if self.settings.get("work_types", {}).get("hybrid"):
+            work_types.append("hybrid")
+        if self.settings.get("work_types", {}).get("office"):
+            work_types.append("office")
+
+        countries = []
+        if self.settings.get("countries", {}).get("russia"):
+            countries.append("russia")
+        if self.settings.get("countries", {}).get("belarus"):
+            countries.append("belarus")
+
+        payload = {
+            "telegramId": self.user_telegram_id,
+            "searchQuery": self.settings.get("query"),
+            "days": self.settings.get("days"),
+            "excludeKeywords": self.settings.get("exclude"),
+            "workTypes": work_types,
+            "countries": countries,
+            "telegramNotify": self.settings.get("telegram_notify", False),
+            "autoUpdateEnabled": self.settings.get("auto_update", {}).get("enabled", False),
+            "autoUpdateInterval": self.settings.get("auto_update", {}).get("interval_minutes", 30),
+            "theme": self.settings.get("theme", "light")
+        }
+
+        self.api.update_settings(payload)
 
     def apply_theme(self):
         app = QApplication.instance()
@@ -1252,6 +1362,11 @@ class VacancyApp(QMainWindow):
         self.auto_update_checkbox.setMinimumHeight(25)
         settings_layout.addWidget(self.auto_update_checkbox)
 
+        self.telegram_notify_checkbox = QCheckBox("Рассылка в Telegram")
+        self.telegram_notify_checkbox.setChecked(self.settings.get('telegram_notify', False))
+        self.telegram_notify_checkbox.setMinimumHeight(25)
+        settings_layout.addWidget(self.telegram_notify_checkbox)
+
         self.auto_update_interval = QSpinBox()
         self.auto_update_interval.setRange(1, 1440)
         self.auto_update_interval.setValue(
@@ -1485,7 +1600,8 @@ class VacancyApp(QMainWindow):
             "days": days,
             "work_types": work_types,
             "countries": countries,
-            "auto_update": auto_update
+            "auto_update": auto_update,
+            "telegram_notify": self.telegram_notify_checkbox.isChecked()
         })
 
         self.save_settings()
@@ -1579,38 +1695,81 @@ class VacancyApp(QMainWindow):
                     logger.info(f"Открытие ссылки: {link}")
                     QDesktopServices.openUrl(link)
 
+    def format_datetime(self, value):
+        if not value:
+            return ""
+        try:
+            cleaned = value.replace("Z", "").replace("+00:00", "")
+            dt = datetime.fromisoformat(cleaned)
+            return dt.strftime("%Y-%m-%d %H:%M:%S")
+        except Exception:
+            return value
+
+    def normalize_vacancy(self, vacancy):
+        status = vacancy.get("status")
+        status_value = "NEW" if status == "NEW" else "OLD"
+        published_at = vacancy.get("publishedAt")
+        loaded_at = vacancy.get("loadedAt")
+
+        return {
+            "id": vacancy.get("id"),
+            "title": vacancy.get("title") or "-",
+            "company": vacancy.get("employer") or "-",
+            "city": vacancy.get("city") or "-",
+            "salary": vacancy.get("salary") or "не указана",
+            "date": self.format_datetime(published_at)[:10] if published_at else "",
+            "link": vacancy.get("url") or "#",
+            "schedule": vacancy.get("schedule") or "-",
+            "status": status_value,
+            "loaded_at": self.format_datetime(loaded_at)
+        }
+
+    def build_search_payload(self):
+        work_types = [k for k, v in self.settings.get("work_types", {}).items() if v]
+        countries = [k for k, v in self.settings.get("countries", {}).items() if v]
+
+        return {
+            "query": self.settings.get("query"),
+            "days": self.settings.get("days"),
+            "workTypes": work_types,
+            "countries": countries,
+            "excludeKeywords": self.settings.get("exclude"),
+            "telegramNotify": self.settings.get("telegram_notify", False)
+        }
+
     def load_vacancies_from_file(self):
-        logger.info("Загрузка вакансий из TinyDB")
-        vacancies_table = db.table('vacancies')
-        self.vacancies = vacancies_table.all()
-        logger.info(f"Загружено {len(self.vacancies)} вакансий из базы")
+        if not self.subscription_active:
+            self.vacancies = []
+            return
+
+        try:
+            server_vacancies = self.api.get_vacancies()
+            self.vacancies = [self.normalize_vacancy(v) for v in server_vacancies]
+            logger.info(f"Загружено {len(self.vacancies)} вакансий с сервера")
+        except Exception as e:
+            logger.error(f"Ошибка загрузки вакансий: {e}")
+            self.vacancies = []
 
     def save_vacancies_to_file(self):
-        logger.info("Сохранение вакансий в TinyDB")
-        vacancies_table = db.table('vacancies')
-        vacancies_table.truncate()
-        vacancies_table.insert_multiple(self.vacancies)
-        logger.info("Вакансии сохранены")
+        return
 
     def update_vacancies(self):
         logger.info("Нажата кнопка 'Обновить'")
+        if not self.subscription_active:
+            return
         self.update_btn.setEnabled(False)
         self.update_btn.setText("⏳ Обновление...")
-        old_links = {v['link'] for v in self.vacancies}
-        self.worker = UpdateWorker(self.settings.copy(), old_links)  # ← передаём old_links
-        self.worker.finished.connect(self.on_update_finished)
+        old_ids = {v['id'] for v in self.vacancies if v.get("id")}
+        search_payload = self.build_search_payload()
+        self.worker = UpdateWorker(self.token, search_payload, old_ids)
+        self.worker.finished.connect(self.on_update_finished_with_server)
         self.worker.error.connect(self.on_update_error)
         self.worker.start()
 
-    def on_update_finished(self, truly_new):
-        logger.info(f"Обновление завершено: {len(truly_new)} новых вакансий")
+    def on_update_finished_with_server(self, server_vacancies, new_count):
+        logger.info(f"Обновление завершено: {new_count} новых вакансий")
 
-        for v in truly_new:
-            if 'status' not in v:
-                v['status'] = 'NEW'
-        self.vacancies.extend(truly_new)
-        print(f"DEBUG: on_update_finished: {len(truly_new)} новых, вызываем save")
-        self.save_vacancies_to_file()
+        self.vacancies = [self.normalize_vacancy(v) for v in server_vacancies]
         self.populate_stats_dates()
         self.update_table()
         self.update_stats_chart()
@@ -1618,11 +1777,11 @@ class VacancyApp(QMainWindow):
         self.update_btn.setEnabled(True)
         self.update_btn.setText("🔄 Обновить")
 
-        if truly_new:
+        if new_count:
             msg = QMessageBox(self)
             msg.setIcon(QMessageBox.Information)
             msg.setWindowTitle("Успех")
-            msg.setText(f"✅ Найдено {len(truly_new)} новых вакансий!")
+            msg.setText(f"✅ Найдено {new_count} новых вакансий!")
             msg.setStandardButtons(QMessageBox.Ok)
             msg.exec()
         else:
@@ -1657,6 +1816,7 @@ class VacancyApp(QMainWindow):
     def mark_selected_as_old(self):
         logger.info("Пометка выбранных как просмотренные")
         updated = 0
+        ids_to_mark = []
         for row in range(self.table.rowCount()):
             checkbox = self.table.cellWidget(row, 0)
             if checkbox and checkbox.isChecked():
@@ -1666,11 +1826,17 @@ class VacancyApp(QMainWindow):
                     for v in self.vacancies:
                         if v.get('link') == link:
                             v['status'] = 'OLD'
+                            if v.get("id"):
+                                ids_to_mark.append(v["id"])
                             updated += 1
                             break
 
         if updated > 0:
-            self.save_vacancies_to_file()
+            if self.subscription_active and ids_to_mark:
+                try:
+                    self.api.mark_multiple_viewed(ids_to_mark)
+                except Exception as e:
+                    logger.error(f"Ошибка отметки вакансий: {e}")
             self.update_table()
             self.update_stats_chart()
             msg = QMessageBox(self)
