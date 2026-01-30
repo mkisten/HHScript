@@ -543,6 +543,25 @@ class VacancyApp(QMainWindow):
             self.subscription_active = False
         return True
 
+    def ensure_authenticated(self):
+        if not self.token:
+            if not self.authenticate():
+                return False
+
+        status = self.api.get_subscription_status()
+        if not status:
+            if not self.authenticate():
+                return False
+            status = self.api.get_subscription_status()
+            if not status:
+                return False
+
+        self.subscription_status = status
+        self.subscription_active = bool(status.get("active"))
+        self.user_telegram_id = status.get("telegramId")
+        self.apply_subscription_state()
+        return True
+
     def apply_subscription_state(self):
         enabled = self.subscription_active
         controls = [
@@ -844,6 +863,8 @@ class VacancyApp(QMainWindow):
         if self.worker and self.worker.isRunning():
             logger.info("Обновление уже выполняется, пропускаем")
             return
+        if not self.ensure_authenticated():
+            return
         if not self.subscription_active:
             return
         old_ids = {v['id'] for v in self.vacancies if v.get("id")}
@@ -914,6 +935,8 @@ class VacancyApp(QMainWindow):
             self.settings = DEFAULT_SETTINGS.copy()
 
     def save_settings(self):
+        if not self.ensure_authenticated():
+            return
         if not self.subscription_active:
             return
 
@@ -1882,6 +1905,8 @@ class VacancyApp(QMainWindow):
 
     def update_vacancies(self):
         logger.info("Нажата кнопка 'Обновить'")
+        if not self.ensure_authenticated():
+            return
         if not self.subscription_active:
             return
         self.update_btn.setEnabled(False)
