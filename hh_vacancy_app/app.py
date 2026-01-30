@@ -75,9 +75,16 @@ class ApiClient:
         self.auth_base_url = auth_base_url.rstrip("/")
         self.vacancy_base_url = vacancy_base_url.rstrip("/")
         self.session = requests.Session()
+        self.token = None
 
     def set_token(self, token):
+        self.token = token
         self.session.headers.update({"Authorization": f"Bearer {token}"})
+
+    def _auth_headers(self):
+        if not self.token:
+            return {}
+        return {"Authorization": f"Bearer {self.token}"}
 
     def create_auth_session(self, device_id):
         resp = requests.post(
@@ -99,30 +106,53 @@ class ApiClient:
         return resp.json()
 
     def get_subscription_status(self):
-        resp = self.session.get(f"{self.auth_base_url}/api/subscription/status", timeout=10)
+        resp = self.session.get(
+            f"{self.auth_base_url}/api/subscription/status",
+            headers=self._auth_headers(),
+            timeout=10
+        )
         if resp.status_code == 401:
             return None
         resp.raise_for_status()
         return resp.json()
 
     def get_settings(self):
-        resp = self.session.get(f"{self.vacancy_base_url}/api/settings", timeout=10)
+        resp = self.session.get(
+            f"{self.vacancy_base_url}/api/settings",
+            headers=self._auth_headers(),
+            timeout=10
+        )
         resp.raise_for_status()
         return resp.json()
 
     def update_settings(self, payload):
-        resp = self.session.put(f"{self.vacancy_base_url}/api/settings", json=payload, timeout=10)
+        resp = self.session.put(
+            f"{self.vacancy_base_url}/api/settings",
+            json=payload,
+            headers=self._auth_headers(),
+            timeout=10
+        )
         resp.raise_for_status()
         return resp.json()
 
     def search_vacancies(self, payload):
-        resp = self.session.post(f"{self.vacancy_base_url}/api/vacancies/search", json=payload, timeout=30)
+        resp = self.session.post(
+            f"{self.vacancy_base_url}/api/vacancies/search",
+            json=payload,
+            headers=self._auth_headers(),
+            timeout=30
+        )
         resp.raise_for_status()
         return resp.json()
 
     def get_vacancies(self, status=None):
         params = {"status": status} if status else {}
-        resp = self.session.get(f"{self.vacancy_base_url}/api/vacancies", params=params, timeout=10)
+        resp = self.session.get(
+            f"{self.vacancy_base_url}/api/vacancies",
+            params=params,
+            headers=self._auth_headers(),
+            timeout=10
+        )
         resp.raise_for_status()
         return resp.json()
 
@@ -130,6 +160,7 @@ class ApiClient:
         resp = self.session.post(
             f"{self.vacancy_base_url}/api/vacancies/mark-multiple-viewed",
             json=vacancy_ids,
+            headers=self._auth_headers(),
             timeout=10
         )
         resp.raise_for_status()
