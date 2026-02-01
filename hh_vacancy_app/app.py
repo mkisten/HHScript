@@ -8,15 +8,17 @@ import logging
 from datetime import datetime, timedelta
 from collections import defaultdict
 import uuid
+import json as jsonlib
 
 import requests
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QLabel, QLineEdit, QTableWidget, QTableWidgetItem,
     QHeaderView, QMessageBox, QDialog, QAbstractItemView, QCheckBox, QSpinBox,
-    QFrame, QGroupBox, QSystemTrayIcon, QMenu, QTabWidget, QComboBox
+    QFrame, QGroupBox, QSystemTrayIcon, QMenu, QTabWidget, QComboBox, QFormLayout,
+    QDateEdit
 )
-from PySide6.QtCore import Qt, Signal, QObject, QThread, QTimer
+from PySide6.QtCore import Qt, Signal, QObject, QThread, QTimer, QDate
 from PySide6.QtGui import QDesktopServices, QColor, QPalette, QFont, QIcon, QPixmap, QAction, QPainter
 from PySide6.QtCharts import QChart, QChartView, QBarSeries, QBarSet, QValueAxis, QBarCategoryAxis, QCategoryAxis
 # Сразу после всех импортов добавьте:
@@ -45,7 +47,7 @@ LOG_FILE = data_dir / "app.log"  # Для лога
 TOKEN_FILE = data_dir / "auth.json"
 
 AUTH_BASE_URL = os.getenv("AUTH_SERVICE_URL", "https://api.subscriptionhhapp.ru").rstrip("/")
-VACANCY_BASE_URL = os.getenv("VACANCY_SERVICE_URL", "http://103.71.21.122:8081").rstrip("/")
+VACANCY_BASE_URL = os.getenv("VACANCY_SERVICE_URL", "https://vacancy.subscriptionhhapp.ru").rstrip("/")
 BOT_USERNAME = os.getenv("TELEGRAM_BOT_USERNAME", "hhsubscription_bot")
 
 # Настройка логирования
@@ -80,6 +82,11 @@ class ApiClient:
     def set_token(self, token):
         self.token = token
         self.session.headers.update({"Authorization": f"Bearer {token}"})
+
+    def clear_token(self):
+        self.token = None
+        if "Authorization" in self.session.headers:
+            self.session.headers.pop("Authorization")
 
     def _auth_headers(self):
         if not self.token:
@@ -164,6 +171,198 @@ class ApiClient:
             timeout=10
         )
         resp.raise_for_status()
+
+    def delete_vacancy(self, vacancy_id):
+        resp = self.session.delete(
+            f"{self.vacancy_base_url}/api/vacancies/{vacancy_id}",
+            headers=self._auth_headers(),
+            timeout=10
+        )
+        resp.raise_for_status()
+
+    def get_current_user(self):
+        resp = self.session.get(
+            f"{self.auth_base_url}/api/auth/me",
+            headers=self._auth_headers(),
+            timeout=10
+        )
+        if resp.status_code == 401:
+            return None
+        resp.raise_for_status()
+        return resp.json()
+
+    def update_profile(self, payload):
+        resp = self.session.put(
+            f"{self.auth_base_url}/api/auth/profile",
+            json=payload,
+            headers=self._auth_headers(),
+            timeout=10
+        )
+        resp.raise_for_status()
+        return resp.json()
+
+    def get_user_payments(self):
+        resp = self.session.get(
+            f"{self.auth_base_url}/api/payments/my-payments",
+            headers=self._auth_headers(),
+            timeout=10
+        )
+        resp.raise_for_status()
+        return resp.json()
+
+    def create_payment(self, payload):
+        resp = self.session.post(
+            f"{self.auth_base_url}/api/payments/create",
+            json=payload,
+            headers=self._auth_headers(),
+            timeout=10
+        )
+        resp.raise_for_status()
+        return resp.json()
+
+    def check_payment_status(self, payment_id):
+        resp = self.session.get(
+            f"{self.auth_base_url}/api/payments/{payment_id}/status",
+            headers=self._auth_headers(),
+            timeout=10
+        )
+        resp.raise_for_status()
+        return resp.json()
+
+    def cancel_payment(self, payment_id):
+        resp = self.session.post(
+            f"{self.auth_base_url}/api/payments/{payment_id}/cancel",
+            headers=self._auth_headers(),
+            timeout=10
+        )
+        resp.raise_for_status()
+        return resp.json()
+
+    def get_admin_users(self):
+        resp = self.session.get(
+            f"{self.auth_base_url}/api/admin/all-users",
+            headers=self._auth_headers(),
+            timeout=10
+        )
+        resp.raise_for_status()
+        return resp.json()
+
+    def update_admin_user(self, telegram_id, payload):
+        resp = self.session.put(
+            f"{self.auth_base_url}/api/admin/users/{telegram_id}",
+            json=payload,
+            headers=self._auth_headers(),
+            timeout=10
+        )
+        resp.raise_for_status()
+        return resp.json()
+
+    def extend_subscription(self, payload):
+        resp = self.session.post(
+            f"{self.auth_base_url}/api/admin/extend-subscription",
+            json=payload,
+            headers=self._auth_headers(),
+            timeout=10
+        )
+        resp.raise_for_status()
+        return resp.json()
+
+    def set_user_role(self, telegram_id, role):
+        resp = self.session.post(
+            f"{self.auth_base_url}/api/admin/users/{telegram_id}/role",
+            params={"role": role},
+            headers=self._auth_headers(),
+            timeout=10
+        )
+        resp.raise_for_status()
+        return resp.json()
+
+    def delete_user(self, telegram_id):
+        resp = self.session.delete(
+            f"{self.auth_base_url}/api/admin/users/{telegram_id}",
+            headers=self._auth_headers(),
+            timeout=10
+        )
+        resp.raise_for_status()
+        return resp.json()
+
+    def get_admin_stats(self):
+        resp = self.session.get(
+            f"{self.auth_base_url}/api/admin/stats",
+            headers=self._auth_headers(),
+            timeout=10
+        )
+        resp.raise_for_status()
+        return resp.json()
+
+    def get_admin_payment_stats(self):
+        resp = self.session.get(
+            f"{self.auth_base_url}/api/admin/payments/stats",
+            headers=self._auth_headers(),
+            timeout=10
+        )
+        resp.raise_for_status()
+        return resp.json()
+
+    def get_admin_payments(self, status=None, page=0, size=20):
+        params = {"status": status, "page": page, "size": size}
+        resp = self.session.get(
+            f"{self.auth_base_url}/api/admin/payments/all",
+            params=params,
+            headers=self._auth_headers(),
+            timeout=10
+        )
+        resp.raise_for_status()
+        return resp.json()
+
+    def verify_admin_payment(self, payment_id, notes=None):
+        resp = self.session.post(
+            f"{self.auth_base_url}/api/admin/payments/{payment_id}/verify",
+            params={"notes": notes or ""},
+            headers=self._auth_headers(),
+            timeout=10
+        )
+        resp.raise_for_status()
+        return resp.json()
+
+    def reject_admin_payment(self, payment_id, reason):
+        resp = self.session.post(
+            f"{self.auth_base_url}/api/admin/payments/{payment_id}/reject",
+            params={"reason": reason},
+            headers=self._auth_headers(),
+            timeout=10
+        )
+        resp.raise_for_status()
+        return resp.json()
+
+    def get_bot_stats(self):
+        resp = self.session.get(
+            f"{self.auth_base_url}/api/admin/bot/stats",
+            headers=self._auth_headers(),
+            timeout=10
+        )
+        resp.raise_for_status()
+        return resp.json()
+
+    def bot_control(self, action):
+        resp = self.session.post(
+            f"{self.auth_base_url}/api/admin/bot/control",
+            json={"action": action},
+            headers=self._auth_headers(),
+            timeout=10
+        )
+        resp.raise_for_status()
+        return resp.json()
+
+    def bot_broadcast(self, message):
+        resp = self.session.post(
+            f"{self.auth_base_url}/api/admin/bot/broadcast",
+            json={"message": message},
+            headers=self._auth_headers(),
+            timeout=30
+        )
+        resp.raise_for_status()
+        return resp.json()
 
 
 class TelegramAuthDialog(QDialog):
@@ -288,6 +487,219 @@ class SubscriptionPayDialog(QDialog):
         webbrowser.open(f"https://t.me/{self.bot_username}")
 
 
+class PaymentCreateDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Создать платеж")
+        self.setModal(True)
+        self.resize(380, 220)
+
+        layout = QVBoxLayout(self)
+        form = QFormLayout()
+
+        self.plan_combo = QComboBox()
+        self.plan_combo.addItems(["MONTHLY", "YEARLY", "LIFETIME"])
+        form.addRow("Тариф:", self.plan_combo)
+
+        self.months_spin = QSpinBox()
+        self.months_spin.setRange(1, 12)
+        self.months_spin.setValue(1)
+        form.addRow("Месяцев:", self.months_spin)
+
+        layout.addLayout(form)
+
+        btn_row = QHBoxLayout()
+        self.create_btn = QPushButton("Создать")
+        self.cancel_btn = QPushButton("Отмена")
+        self.create_btn.clicked.connect(self.accept)
+        self.cancel_btn.clicked.connect(self.reject)
+        btn_row.addWidget(self.create_btn)
+        btn_row.addWidget(self.cancel_btn)
+        layout.addLayout(btn_row)
+
+    def get_payload(self):
+        return {
+            "plan": self.plan_combo.currentText(),
+            "months": self.months_spin.value()
+        }
+
+
+class SubscriptionExtendDialog(QDialog):
+    def __init__(self, user, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Продлить подписку")
+        self.setModal(True)
+        self.resize(420, 260)
+        self.user = user
+
+        layout = QVBoxLayout(self)
+        form = QFormLayout()
+
+        self.plan_combo = QComboBox()
+        self.plan_combo.addItems(["MONTHLY", "YEARLY", "LIFETIME", "TRIAL"])
+        current_plan = (user.get("subscriptionPlan") or "MONTHLY").upper()
+        index = self.plan_combo.findText(current_plan)
+        if index >= 0:
+            self.plan_combo.setCurrentIndex(index)
+        form.addRow("Тариф:", self.plan_combo)
+
+        self.days_spin = QSpinBox()
+        self.days_spin.setRange(1, 36500)
+        self.days_spin.setValue(30)
+        form.addRow("Дней:", self.days_spin)
+
+        self.use_date_checkbox = QCheckBox("Использовать дату")
+        self.end_date_edit = QDateEdit()
+        self.end_date_edit.setCalendarPopup(True)
+        self.end_date_edit.setDate(QDate.currentDate().addDays(30))
+        self.end_date_edit.setEnabled(False)
+        self.use_date_checkbox.toggled.connect(self.end_date_edit.setEnabled)
+        form.addRow(self.use_date_checkbox, self.end_date_edit)
+
+        layout.addLayout(form)
+
+        btn_row = QHBoxLayout()
+        self.save_btn = QPushButton("Продлить")
+        self.cancel_btn = QPushButton("Отмена")
+        self.save_btn.clicked.connect(self.accept)
+        self.cancel_btn.clicked.connect(self.reject)
+        btn_row.addWidget(self.save_btn)
+        btn_row.addWidget(self.cancel_btn)
+        layout.addLayout(btn_row)
+
+    def get_payload(self):
+        days = self.days_spin.value()
+        if self.use_date_checkbox.isChecked():
+            target = self.end_date_edit.date()
+            delta = QDate.currentDate().daysTo(target)
+            days = max(0, delta)
+        return {
+            "telegramId": self.user.get("telegramId"),
+            "days": days,
+            "plan": self.plan_combo.currentText()
+        }
+
+
+class SubscriptionPlanDialog(QDialog):
+    def __init__(self, user, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Применить тариф")
+        self.setModal(True)
+        self.resize(360, 200)
+        self.user = user
+
+        layout = QVBoxLayout(self)
+        form = QFormLayout()
+
+        self.plan_combo = QComboBox()
+        self.plan_combo.addItems(["MONTHLY", "YEARLY", "LIFETIME", "TRIAL"])
+        form.addRow("Тариф:", self.plan_combo)
+
+        self.days_label = QLabel("30")
+        form.addRow("Дней будет:", self.days_label)
+        self.plan_combo.currentTextChanged.connect(self.update_days_label)
+        self.update_days_label(self.plan_combo.currentText())
+
+        layout.addLayout(form)
+
+        btn_row = QHBoxLayout()
+        self.apply_btn = QPushButton("Применить")
+        self.cancel_btn = QPushButton("Отмена")
+        self.apply_btn.clicked.connect(self.accept)
+        self.cancel_btn.clicked.connect(self.reject)
+        btn_row.addWidget(self.apply_btn)
+        btn_row.addWidget(self.cancel_btn)
+        layout.addLayout(btn_row)
+
+    def update_days_label(self, plan):
+        days = 30
+        if plan == "YEARLY":
+            days = 365
+        elif plan == "LIFETIME":
+            days = 36500
+        elif plan == "TRIAL":
+            days = 7
+        self.days_label.setText(str(days))
+
+    def get_payload(self):
+        plan = self.plan_combo.currentText()
+        days = int(self.days_label.text())
+        return {
+            "subscriptionPlan": plan,
+            "subscriptionDays": days
+        }
+
+
+class AdminUserEditDialog(QDialog):
+    def __init__(self, user, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Редактирование пользователя")
+        self.setModal(True)
+        self.resize(460, 320)
+        self.user = user
+
+        layout = QVBoxLayout(self)
+        form = QFormLayout()
+
+        self.first_name = QLineEdit(user.get("firstName") or "")
+        self.last_name = QLineEdit(user.get("lastName") or "")
+        self.username = QLineEdit(user.get("username") or "")
+        self.email = QLineEdit(user.get("email") or "")
+        self.phone = QLineEdit(user.get("phone") or "")
+
+        self.subscription_days = QSpinBox()
+        self.subscription_days.setRange(0, 36500)
+        self.subscription_days.setValue(int(user.get("daysRemaining") or 0))
+
+        self.subscription_plan = QComboBox()
+        self.subscription_plan.addItems(["MONTHLY", "YEARLY", "LIFETIME", "TRIAL"])
+        current_plan = (user.get("subscriptionPlan") or "MONTHLY").upper()
+        index = self.subscription_plan.findText(current_plan)
+        if index >= 0:
+            self.subscription_plan.setCurrentIndex(index)
+
+        self.role_combo = QComboBox()
+        self.role_combo.addItems(["USER", "ADMIN", "MODERATOR"])
+        current_role = (user.get("role") or "USER").upper()
+        role_index = self.role_combo.findText(current_role)
+        if role_index >= 0:
+            self.role_combo.setCurrentIndex(role_index)
+
+        form.addRow("Имя:", self.first_name)
+        form.addRow("Фамилия:", self.last_name)
+        form.addRow("Username:", self.username)
+        form.addRow("Email:", self.email)
+        form.addRow("Телефон:", self.phone)
+        form.addRow("Дней подписки:", self.subscription_days)
+        form.addRow("Тариф:", self.subscription_plan)
+        form.addRow("Роль:", self.role_combo)
+
+        layout.addLayout(form)
+
+        btn_row = QHBoxLayout()
+        self.save_btn = QPushButton("Сохранить")
+        self.cancel_btn = QPushButton("Отмена")
+        self.save_btn.clicked.connect(self.accept)
+        self.cancel_btn.clicked.connect(self.reject)
+        btn_row.addWidget(self.save_btn)
+        btn_row.addWidget(self.cancel_btn)
+        layout.addLayout(btn_row)
+
+    def get_payload(self):
+        return {
+            "firstName": self.first_name.text().strip() or None,
+            "lastName": self.last_name.text().strip() or None,
+            "username": self.username.text().strip() or None,
+            "email": self.email.text().strip() or None,
+            "phone": self.phone.text().strip() or None,
+            "subscriptionDays": self.subscription_days.value(),
+            "subscriptionPlan": self.subscription_plan.currentText()
+        }
+
+    def get_role(self):
+        return self.role_combo.currentText()
+
+
 DEFAULT_SETTINGS = {
     "query": "Java разработчик",
     "exclude": "Android, QA, Тестировщик, Аналитик, C#, архитектор, PHP, Fullstack, 1С, Python, Frontend-разработчик",
@@ -316,22 +728,24 @@ class UpdateWorker(QThread):
     finished = Signal(list, int)
     error = Signal(str)
 
-    def __init__(self, auth_token, search_payload, existing_ids):
+    def __init__(self, auth_token, search_payload, existing_ids, do_search=True):
         super().__init__()
         self.auth_token = auth_token
         self.search_payload = search_payload
         self.existing_ids = existing_ids
+        self.do_search = do_search
 
     def run(self):
         try:
             headers = {"Authorization": f"Bearer {self.auth_token}"}
-            search_resp = requests.post(
-                f"{VACANCY_BASE_URL}/api/vacancies/search",
-                json=self.search_payload,
-                headers=headers,
-                timeout=30
-            )
-            search_resp.raise_for_status()
+            if self.do_search:
+                search_resp = requests.post(
+                    f"{VACANCY_BASE_URL}/api/vacancies/search",
+                    json=self.search_payload,
+                    headers=headers,
+                    timeout=30
+                )
+                search_resp.raise_for_status()
 
             list_resp = requests.get(
                 f"{VACANCY_BASE_URL}/api/vacancies",
@@ -345,6 +759,51 @@ class UpdateWorker(QThread):
             self.finished.emit(vacancies, new_count)
         except Exception as e:
             logger.exception("Ошибка в фоновом потоке")
+            self.error.emit(str(e))
+
+
+class VacancyStreamWorker(QThread):
+    new_vacancies = Signal(list)
+    error = Signal(str)
+
+    def __init__(self, auth_token, base_url):
+        super().__init__()
+        self.auth_token = auth_token
+        self.base_url = base_url.rstrip("/")
+        self._stop = False
+
+    def stop(self):
+        self._stop = True
+
+    def run(self):
+        try:
+            headers = {"Authorization": f"Bearer {self.auth_token}"}
+            with requests.get(
+                f"{self.base_url}/api/vacancies/stream",
+                headers=headers,
+                stream=True,
+                timeout=(10, None)
+            ) as resp:
+                resp.raise_for_status()
+                buffer = ""
+                for line in resp.iter_lines(decode_unicode=True):
+                    if self._stop:
+                        break
+                    if line is None:
+                        continue
+                    if line == "":
+                        if buffer:
+                            try:
+                                payload = jsonlib.loads(buffer)
+                                if isinstance(payload, list):
+                                    self.new_vacancies.emit(payload)
+                            except Exception as e:
+                                logger.warning(f"Ошибка парсинга SSE: {e}")
+                            buffer = ""
+                        continue
+                    if line.startswith("data:"):
+                        buffer += line[5:].strip()
+        except Exception as e:
             self.error.emit(str(e))
 
 
@@ -432,10 +891,20 @@ class VacancyApp(QMainWindow):
         self.worker = None
         self.auto_update_timer = QTimer(self)
         self.auto_update_timer.timeout.connect(self.auto_update_check)
+        self.stream_retry_timer = QTimer(self)
+        self.stream_retry_timer.setSingleShot(True)
+        self.stream_retry_timer.timeout.connect(self.start_stream)
         logger.info("Запуск приложения")
         # print(f"DEBUG: DATA_FILE = {DATA_FILE}")
         self.api = ApiClient(AUTH_BASE_URL, VACANCY_BASE_URL)
         self.token = None
+        self.current_user = None
+        self.is_admin = False
+        self.user_payments = []
+        self.admin_users = []
+        self.filtered_admin_users = []
+        self.admin_payments = []
+        self.stream_worker = None
         self.subscription_active = False
         self.subscription_status = None
         self.user_telegram_id = None
@@ -445,6 +914,14 @@ class VacancyApp(QMainWindow):
         self.load_settings()
         self.init_ui()  # Сначала создаём UI
         self.apply_theme()
+        self.refresh_account_profile()
+        self.refresh_account_subscription()
+        self.load_user_payments()
+        if self.is_admin:
+            self.load_admin_users()
+            self.load_admin_payments()
+            self.load_admin_stats()
+            self.load_bot_stats()
         self.load_vacancies_from_file()
         self.populate_stats_dates()  # Теперь stats_date_combo уже существует
         self.on_stats_mode_changed(self.stats_mode_combo.currentText())
@@ -452,9 +929,9 @@ class VacancyApp(QMainWindow):
         self.update_stats_chart()
         self.setup_auto_update()
         self.apply_subscription_state()
+        self.start_stream()
 
-        if self.subscription_active:
-            self.update_vacancies()
+        self.update_vacancies()
 
         self.tray_icon = None
         self.setup_system_tray()
@@ -501,6 +978,46 @@ class VacancyApp(QMainWindow):
         else:
             logger.error("Иконка системного трея не отображается, проверьте настройки Windows 11")
 
+    def start_stream(self):
+        if self.stream_worker and self.stream_worker.isRunning():
+            return
+        if not self.token:
+            return
+        self.stream_worker = VacancyStreamWorker(self.token, VACANCY_BASE_URL)
+        self.stream_worker.new_vacancies.connect(self.on_stream_vacancies)
+        self.stream_worker.error.connect(self.on_stream_error)
+        self.stream_worker.finished.connect(self.schedule_stream_reconnect)
+        self.stream_worker.start()
+
+    def stop_stream(self):
+        if self.stream_worker:
+            self.stream_worker.stop()
+            self.stream_worker.wait(1000)
+            self.stream_worker = None
+
+    def schedule_stream_reconnect(self):
+        if self.stream_retry_timer.isActive():
+            return
+        self.stream_retry_timer.start(5000)
+
+    def on_stream_vacancies(self, vacancies):
+        try:
+            normalized = [self.normalize_vacancy(v) for v in vacancies]
+            existing_ids = {v.get("id") for v in self.vacancies}
+            new_items = [v for v in normalized if v.get("id") not in existing_ids]
+            if not new_items:
+                return
+            self.vacancies.extend(new_items)
+            self.populate_stats_dates()
+            self.update_table()
+            self.update_stats_chart()
+        except Exception as e:
+            logger.warning(f"Ошибка обновления из SSE: {e}")
+
+    def on_stream_error(self, message):
+        logger.warning(f"SSE поток завершился: {message}")
+        self.schedule_stream_reconnect()
+
     def load_token(self):
         if not TOKEN_FILE.exists():
             return None
@@ -524,6 +1041,7 @@ class VacancyApp(QMainWindow):
                 self.subscription_status = status
                 self.subscription_active = bool(status.get("active"))
                 self.user_telegram_id = status.get("telegramId")
+                self.load_current_user()
                 return True
 
         dialog = TelegramAuthDialog(self.api, self)
@@ -539,9 +1057,21 @@ class VacancyApp(QMainWindow):
             self.subscription_status = status
             self.subscription_active = bool(status.get("active"))
             self.user_telegram_id = status.get("telegramId")
+            self.load_current_user()
         else:
             self.subscription_active = False
         return True
+
+    def load_current_user(self):
+        try:
+            user = self.api.get_current_user()
+            self.current_user = user
+            role = (user or {}).get("role") or ""
+            self.is_admin = role.upper() == "ADMIN"
+        except Exception as e:
+            logger.warning(f"Не удалось загрузить профиль: {e}")
+            self.current_user = None
+            self.is_admin = False
 
     def ensure_authenticated(self):
         if not self.token:
@@ -559,12 +1089,15 @@ class VacancyApp(QMainWindow):
         self.subscription_status = status
         self.subscription_active = bool(status.get("active"))
         self.user_telegram_id = status.get("telegramId")
+        self.load_current_user()
+        if hasattr(self, "profile_first_name"):
+            self.refresh_account_profile()
         self.apply_subscription_state()
         return True
 
     def apply_subscription_state(self):
         enabled = self.subscription_active
-        controls = [
+        base_controls = [
             self.query_input,
             self.days_input,
             self.remote_checkbox,
@@ -572,27 +1105,31 @@ class VacancyApp(QMainWindow):
             self.office_checkbox,
             self.russia_checkbox,
             self.belarus_checkbox,
-            self.auto_update_checkbox,
-            self.auto_update_interval,
-            self.telegram_notify_checkbox,
             self.save_settings_btn,
             self.exclude_input,
             self.update_btn
         ]
-        for control in controls:
+
+        for control in base_controls:
+            control.setEnabled(True)
+
+        auto_controls = [
+            self.auto_update_checkbox,
+            self.auto_update_interval,
+            self.telegram_notify_checkbox
+        ]
+        for control in auto_controls:
             control.setEnabled(enabled)
 
         self.pay_btn.setEnabled(True)
 
-        if not enabled:
+        if not enabled and not self.pay_dialog_shown:
+            self.pay_dialog_shown = True
             QMessageBox.information(
                 self,
                 "Подписка не активна",
-                "Подписка не активна. Доступ к вакансиям и настройкам ограничен."
+                "Подписка не активна. Автообновление и рассылка в Telegram отключены."
             )
-            if not self.pay_dialog_shown:
-                self.pay_dialog_shown = True
-                self.open_payment_dialog()
 
         self.update_subscription_status_ui()
 
@@ -612,10 +1149,378 @@ class VacancyApp(QMainWindow):
             self.sub_status_label.setText("Подписка не активна")
 
         self.sub_plan_label.setText(f"Тариф: {plan}")
+        self.refresh_account_subscription()
 
     def open_payment_dialog(self):
         dialog = SubscriptionPayDialog(BOT_USERNAME, self)
         dialog.exec()
+
+    def refresh_account_subscription(self):
+        if not hasattr(self, "account_status_label"):
+            return
+        status = self.subscription_status or {}
+        active = bool(status.get("active"))
+        days = status.get("daysRemaining")
+        plan = status.get("subscriptionPlan") or "—"
+        end_date = status.get("subscriptionEndDate") or "—"
+        self.account_status_label.setText("Статус: Активна" if active else "Статус: Неактивна")
+        self.account_plan_label.setText(f"Тариф: {plan}")
+        self.account_days_label.setText(f"Осталось дней: {days if days is not None else '—'}")
+        self.account_end_label.setText(f"Дата окончания: {end_date}")
+
+    def refresh_account_profile(self):
+        if not self.current_user:
+            return
+        self.profile_first_name.setText(self.current_user.get("firstName") or "")
+        self.profile_last_name.setText(self.current_user.get("lastName") or "")
+        self.profile_username.setText(self.current_user.get("username") or "")
+        self.profile_email.setText(self.current_user.get("email") or "")
+        self.profile_phone.setText(self.current_user.get("phone") or "")
+
+    def save_profile(self):
+        if not self.ensure_authenticated():
+            return
+        payload = {
+            "firstName": self.profile_first_name.text().strip(),
+            "lastName": self.profile_last_name.text().strip(),
+            "username": self.profile_username.text().strip(),
+            "email": self.profile_email.text().strip(),
+            "phone": self.profile_phone.text().strip()
+        }
+        try:
+            self.current_user = self.api.update_profile(payload)
+            self.refresh_account_profile()
+            QMessageBox.information(self, "Профиль", "Профиль обновлен")
+        except Exception as e:
+            QMessageBox.warning(self, "Ошибка", f"Не удалось обновить профиль: {e}")
+
+    def load_user_payments(self):
+        if not self.ensure_authenticated():
+            return
+        try:
+            self.user_payments = self.api.get_user_payments()
+            self.populate_user_payments()
+        except Exception as e:
+            QMessageBox.warning(self, "Платежи", f"Не удалось загрузить платежи: {e}")
+
+    def populate_user_payments(self):
+        payments = self.user_payments or []
+        self.payments_table.setRowCount(len(payments))
+        for row, payment in enumerate(payments):
+            self.payments_table.setItem(row, 0, QTableWidgetItem(str(payment.get("id"))))
+            self.payments_table.setItem(row, 1, QTableWidgetItem(str(payment.get("plan") or "")))
+            self.payments_table.setItem(row, 2, QTableWidgetItem(str(payment.get("months") or "")))
+            self.payments_table.setItem(row, 3, QTableWidgetItem(str(payment.get("amount") or "")))
+            self.payments_table.setItem(row, 4, QTableWidgetItem(str(payment.get("status") or "")))
+            self.payments_table.setItem(row, 5, QTableWidgetItem(str(payment.get("createdAt") or "")))
+            self.payments_table.setItem(row, 6, QTableWidgetItem(str(payment.get("verifiedAt") or "")))
+            self.payments_table.setItem(row, 7, QTableWidgetItem(str(payment.get("adminNotes") or "")))
+
+    def create_payment(self):
+        if not self.ensure_authenticated():
+            return
+        dialog = PaymentCreateDialog(self)
+        if dialog.exec() != QDialog.Accepted:
+            return
+        try:
+            payload = dialog.get_payload()
+            self.api.create_payment(payload)
+            self.load_user_payments()
+            QMessageBox.information(self, "Платеж", "Платеж создан")
+        except Exception as e:
+            QMessageBox.warning(self, "Платеж", f"Не удалось создать платеж: {e}")
+
+    def _selected_payment_id(self):
+        row = self.payments_table.currentRow()
+        if row < 0:
+            return None
+        item = self.payments_table.item(row, 0)
+        return int(item.text()) if item and item.text().isdigit() else None
+
+    def check_selected_payment(self):
+        payment_id = self._selected_payment_id()
+        if not payment_id:
+            QMessageBox.information(self, "Платежи", "Выберите платеж")
+            return
+        try:
+            self.api.check_payment_status(payment_id)
+            self.load_user_payments()
+        except Exception as e:
+            QMessageBox.warning(self, "Платежи", f"Не удалось проверить статус: {e}")
+
+    def cancel_selected_payment(self):
+        payment_id = self._selected_payment_id()
+        if not payment_id:
+            QMessageBox.information(self, "Платежи", "Выберите платеж")
+            return
+        try:
+            self.api.cancel_payment(payment_id)
+            self.load_user_payments()
+        except Exception as e:
+            QMessageBox.warning(self, "Платежи", f"Не удалось отменить платеж: {e}")
+
+    def load_admin_users(self):
+        if not self.ensure_authenticated():
+            return
+        try:
+            response = self.api.get_admin_users()
+            self.admin_users = response.get("users", []) if isinstance(response, dict) else response
+            self.filtered_admin_users = list(self.admin_users)
+            self.populate_admin_users()
+        except Exception as e:
+            QMessageBox.warning(self, "Администратор", f"Не удалось загрузить пользователей: {e}")
+
+    def filter_admin_users(self):
+        if not hasattr(self, "admin_users"):
+            return
+        query = self.admin_user_search.text().strip().lower()
+        if not query:
+            self.filtered_admin_users = list(self.admin_users)
+        else:
+            self.filtered_admin_users = [
+                u for u in self.admin_users
+                if query in str(u.get("firstName", "")).lower()
+                or query in str(u.get("lastName", "")).lower()
+                or query in str(u.get("username", "")).lower()
+                or query in str(u.get("email", "")).lower()
+            ]
+        self.populate_admin_users()
+
+    def populate_admin_users(self):
+        users = getattr(self, "filtered_admin_users", [])
+        self.admin_users_table.setRowCount(len(users))
+        for row, user in enumerate(users):
+            self.admin_users_table.setItem(row, 0, QTableWidgetItem(str(user.get("telegramId"))))
+            full_name = f"{user.get('firstName') or ''} {user.get('lastName') or ''}".strip()
+            self.admin_users_table.setItem(row, 1, QTableWidgetItem(full_name))
+            self.admin_users_table.setItem(row, 2, QTableWidgetItem(str(user.get("username") or "")))
+            self.admin_users_table.setItem(row, 3, QTableWidgetItem(str(user.get("email") or "")))
+            self.admin_users_table.setItem(row, 4, QTableWidgetItem("Активна" if user.get("isActive") else "Неактивна"))
+            self.admin_users_table.setItem(row, 5, QTableWidgetItem(str(user.get("subscriptionPlan") or "")))
+            self.admin_users_table.setItem(row, 6, QTableWidgetItem(str(user.get("daysRemaining") or "")))
+            self.admin_users_table.setItem(row, 7, QTableWidgetItem(str(user.get("role") or "")))
+            self.admin_users_table.setItem(row, 8, QTableWidgetItem(str(user.get("createdAt") or "")))
+
+    def _selected_admin_user(self):
+        row = self.admin_users_table.currentRow()
+        if row < 0:
+            return None
+        telegram_id_item = self.admin_users_table.item(row, 0)
+        telegram_id = int(telegram_id_item.text()) if telegram_id_item and telegram_id_item.text().isdigit() else None
+        for user in getattr(self, "admin_users", []):
+            if user.get("telegramId") == telegram_id:
+                return user
+        return None
+
+    def edit_selected_admin_user(self):
+        user = self._selected_admin_user()
+        if not user:
+            QMessageBox.information(self, "Администратор", "Выберите пользователя")
+            return
+        dialog = AdminUserEditDialog(user, self)
+        if dialog.exec() != QDialog.Accepted:
+            return
+        try:
+            payload = dialog.get_payload()
+            self.api.update_admin_user(user.get("telegramId"), payload)
+            role = dialog.get_role()
+            if role and role != user.get("role"):
+                self.api.set_user_role(user.get("telegramId"), role)
+            self.load_admin_users()
+        except Exception as e:
+            QMessageBox.warning(self, "Администратор", f"Не удалось обновить пользователя: {e}")
+
+    def extend_selected_admin_user(self):
+        user = self._selected_admin_user()
+        if not user:
+            QMessageBox.information(self, "Администратор", "Выберите пользователя")
+            return
+        dialog = SubscriptionExtendDialog(user, self)
+        if dialog.exec() != QDialog.Accepted:
+            return
+        payload = dialog.get_payload()
+        try:
+            self.api.extend_subscription(payload)
+            self.load_admin_users()
+        except Exception as e:
+            QMessageBox.warning(self, "Администратор", f"Не удалось продлить подписку: {e}")
+
+    def apply_plan_selected_admin_user(self):
+        user = self._selected_admin_user()
+        if not user:
+            QMessageBox.information(self, "Администратор", "Выберите пользователя")
+            return
+        dialog = SubscriptionPlanDialog(user, self)
+        if dialog.exec() != QDialog.Accepted:
+            return
+        payload = dialog.get_payload()
+        try:
+            self.api.update_admin_user(user.get("telegramId"), payload)
+            self.load_admin_users()
+        except Exception as e:
+            QMessageBox.warning(self, "Администратор", f"Не удалось применить тариф: {e}")
+
+    def delete_selected_admin_user(self):
+        user = self._selected_admin_user()
+        if not user:
+            QMessageBox.information(self, "Администратор", "Выберите пользователя")
+            return
+        confirm = QMessageBox.question(
+            self,
+            "Удаление пользователя",
+            f"Удалить пользователя {user.get('telegramId')}?",
+            QMessageBox.Yes | QMessageBox.No
+        )
+        if confirm != QMessageBox.Yes:
+            return
+        try:
+            self.api.delete_user(user.get("telegramId"))
+            self.load_admin_users()
+        except Exception as e:
+            QMessageBox.warning(self, "Администратор", f"Не удалось удалить пользователя: {e}")
+
+    def logout(self):
+        if TOKEN_FILE.exists():
+            TOKEN_FILE.unlink()
+        self.token = None
+        self.api.clear_token()
+        self.stop_stream()
+        self.subscription_status = None
+        self.subscription_active = False
+        self.current_user = None
+        self.is_admin = False
+        self.pay_dialog_shown = False
+        QMessageBox.information(self, "Выход", "Вы вышли из профиля")
+        if not self.authenticate():
+            self.close_application()
+            return
+        self.load_settings()
+        self.refresh_account_profile()
+        self.refresh_account_subscription()
+        self.load_user_payments()
+        if self.is_admin:
+            self.load_admin_users()
+            self.load_admin_payments()
+            self.load_admin_stats()
+            self.load_bot_stats()
+        self.load_vacancies_from_file()
+        self.populate_stats_dates()
+        self.update_table()
+        self.update_stats_chart()
+        self.apply_subscription_state()
+        self.start_stream()
+
+    def load_admin_payments(self):
+        if not self.ensure_authenticated():
+            return
+        status = self.admin_payment_status.currentText()
+        status_param = None if status == "ALL" else status
+        try:
+            response = self.api.get_admin_payments(status=status_param)
+            payments = response.get("payments", []) if isinstance(response, dict) else response
+            self.admin_payments = payments
+            self.populate_admin_payments()
+        except Exception as e:
+            QMessageBox.warning(self, "Администратор", f"Не удалось загрузить платежи: {e}")
+
+    def populate_admin_payments(self):
+        payments = getattr(self, "admin_payments", [])
+        self.admin_payments_table.setRowCount(len(payments))
+        for row, payment in enumerate(payments):
+            self.admin_payments_table.setItem(row, 0, QTableWidgetItem(str(payment.get("id"))))
+            self.admin_payments_table.setItem(row, 1, QTableWidgetItem(str(payment.get("telegramId") or "")))
+            self.admin_payments_table.setItem(row, 2, QTableWidgetItem(str(payment.get("plan") or "")))
+            self.admin_payments_table.setItem(row, 3, QTableWidgetItem(str(payment.get("months") or "")))
+            self.admin_payments_table.setItem(row, 4, QTableWidgetItem(str(payment.get("amount") or "")))
+            self.admin_payments_table.setItem(row, 5, QTableWidgetItem(str(payment.get("status") or "")))
+            self.admin_payments_table.setItem(row, 6, QTableWidgetItem(str(payment.get("createdAt") or "")))
+            self.admin_payments_table.setItem(row, 7, QTableWidgetItem(str(payment.get("adminNotes") or "")))
+
+    def _selected_admin_payment_id(self):
+        row = self.admin_payments_table.currentRow()
+        if row < 0:
+            return None
+        item = self.admin_payments_table.item(row, 0)
+        return int(item.text()) if item and item.text().isdigit() else None
+
+    def verify_selected_payment(self):
+        payment_id = self._selected_admin_payment_id()
+        if not payment_id:
+            QMessageBox.information(self, "Платежи", "Выберите платеж")
+            return
+        try:
+            self.api.verify_admin_payment(payment_id, "Платеж подтвержден")
+            self.load_admin_payments()
+        except Exception as e:
+            QMessageBox.warning(self, "Платежи", f"Не удалось подтвердить: {e}")
+
+    def reject_selected_payment(self):
+        payment_id = self._selected_admin_payment_id()
+        if not payment_id:
+            QMessageBox.information(self, "Платежи", "Выберите платеж")
+            return
+        try:
+            self.api.reject_admin_payment(payment_id, "Платеж отклонен")
+            self.load_admin_payments()
+        except Exception as e:
+            QMessageBox.warning(self, "Платежи", f"Не удалось отклонить: {e}")
+
+    def load_admin_stats(self):
+        if not self.ensure_authenticated():
+            return
+        try:
+            stats = self.api.get_admin_stats()
+            payment_stats = self.api.get_admin_payment_stats()
+            details = (
+                f"Всего пользователей: {stats.get('totalUsers')}\n"
+                f"Активных подписок: {stats.get('activeSubscriptions')}\n"
+                f"Истекших подписок: {stats.get('expiredSubscriptions')}\n"
+                f"Пробный период использован: {stats.get('trialUsedCount')}\n"
+                f"Платежей всего: {payment_stats.get('totalPayments')}\n"
+                f"Ожидают: {payment_stats.get('pendingPayments')}\n"
+                f"Подтверждены: {payment_stats.get('verifiedPayments')}\n"
+                f"Отклонены: {payment_stats.get('rejectedPayments')}"
+            )
+            self.admin_stats_details.setText(details)
+        except Exception as e:
+            QMessageBox.warning(self, "Администратор", f"Не удалось загрузить статистику: {e}")
+
+    def load_bot_stats(self):
+        if not self.ensure_authenticated():
+            return
+        try:
+            stats = self.api.get_bot_stats()
+            details = (
+                f"Всего пользователей: {stats.get('totalUsers')}\n"
+                f"Активных сегодня: {stats.get('activeToday')}\n"
+                f"Сообщений всего: {stats.get('totalMessages')}\n"
+                f"Сообщений сегодня: {stats.get('messagesToday')}\n"
+                f"Статус: {stats.get('botStatus')}\n"
+                f"Обновлено: {stats.get('lastUpdate')}"
+            )
+            self.bot_stats_details.setText(details)
+        except Exception as e:
+            QMessageBox.warning(self, "Бот", f"Не удалось загрузить статистику: {e}")
+
+    def control_bot(self, action):
+        if not self.ensure_authenticated():
+            return
+        try:
+            self.api.bot_control(action)
+            self.load_bot_stats()
+        except Exception as e:
+            QMessageBox.warning(self, "Бот", f"Не удалось выполнить действие: {e}")
+
+    def send_broadcast(self):
+        message = self.broadcast_input.text().strip()
+        if not message:
+            QMessageBox.information(self, "Бот", "Введите текст рассылки")
+            return
+        try:
+            self.api.bot_broadcast(message)
+            QMessageBox.information(self, "Бот", "Рассылка отправлена")
+        except Exception as e:
+            QMessageBox.warning(self, "Бот", f"Не удалось отправить рассылку: {e}")
 
     def show_and_restore(self):
         """Показать и восстановить окно"""
@@ -653,6 +1558,7 @@ class VacancyApp(QMainWindow):
         """Полное завершение приложения"""
         logger.info("Завершение приложения")
         self.auto_update_timer.stop()
+        self.stop_stream()
         if self.worker and self.worker.isRunning():
             self.worker.terminate()
             self.worker.wait()
@@ -693,12 +1599,8 @@ class VacancyApp(QMainWindow):
         try:
             if mode == "Вакансии по часам (за день)":
                 self._update_hourly_chart(chart, selected_date)
-            elif mode == "Вакансии по дням (неделя)":
-                self._update_daily_chart(chart, 7)
             elif mode == "Вакансии по дням (месяц)":
                 self._update_daily_chart(chart, 30)
-            elif mode == "Вакансии по дням (3 месяца)":
-                self._update_daily_chart(chart, 90)
             elif mode == "Вакансии по дням (6 месяцев)":
                 self._update_daily_chart(chart, 180)
             else:
@@ -868,8 +1770,7 @@ class VacancyApp(QMainWindow):
         if not self.subscription_active:
             return
         old_ids = {v['id'] for v in self.vacancies if v.get("id")}
-        search_payload = self.build_search_payload()
-        self.worker = UpdateWorker(self.token, search_payload, old_ids)
+        self.worker = UpdateWorker(self.token, None, old_ids, do_search=False)
         self.worker.finished.connect(self.on_auto_update_finished_with_server)
         self.worker.error.connect(self.on_update_error)
         self.worker.start()
@@ -897,10 +1798,6 @@ class VacancyApp(QMainWindow):
             logger.info("Показано уведомление о новых вакансиях")
 
     def load_settings(self):
-        if not self.subscription_active:
-            self.settings = DEFAULT_SETTINGS.copy()
-            return
-
         try:
             server_settings = self.api.get_settings()
             self.user_telegram_id = server_settings.get("telegramId")
@@ -937,8 +1834,6 @@ class VacancyApp(QMainWindow):
     def save_settings(self):
         if not self.ensure_authenticated():
             return
-        if not self.subscription_active:
-            return
 
         work_types = []
         if self.settings.get("work_types", {}).get("remote"):
@@ -961,8 +1856,8 @@ class VacancyApp(QMainWindow):
             "excludeKeywords": self.settings.get("exclude"),
             "workTypes": work_types,
             "countries": countries,
-            "telegramNotify": self.settings.get("telegram_notify", False),
-            "autoUpdateEnabled": self.settings.get("auto_update", {}).get("enabled", False),
+            "telegramNotify": self.settings.get("telegram_notify", False) if self.subscription_active else False,
+            "autoUpdateEnabled": self.settings.get("auto_update", {}).get("enabled", False) if self.subscription_active else False,
             "autoUpdateInterval": self.settings.get("auto_update", {}).get("interval_minutes", 30),
             "theme": self.settings.get("theme", "light")
         }
@@ -1360,6 +2255,7 @@ class VacancyApp(QMainWindow):
 
         buttons_layout = QHBoxLayout()
         self.update_btn = QPushButton("Обновить")
+        self.search_btn = QPushButton("Запустить поиск")
         self.pay_btn = QPushButton("Продлить")
         self.theme_btn = QPushButton("Темная" if self.settings.get("theme") == "light" else "Светлая")
         self.about_btn = QPushButton("О программе")
@@ -1370,6 +2266,7 @@ class VacancyApp(QMainWindow):
         self.support_btn.clicked.connect(self.show_support_dialog)
 
         self.update_btn.setFixedHeight(40)
+        self.search_btn.setFixedHeight(40)
         self.pay_btn.setFixedHeight(40)
         self.theme_btn.setFixedSize(110, 40)
         self.about_btn.setMinimumWidth(140)
@@ -1377,12 +2274,14 @@ class VacancyApp(QMainWindow):
         self.exit_btn.setFixedSize(110, 40)
 
         self.update_btn.clicked.connect(self.update_vacancies)
+        self.search_btn.clicked.connect(self.run_search)
         self.pay_btn.clicked.connect(self.open_payment_dialog)
         self.exit_btn.clicked.connect(self.close_application)
         self.theme_btn.clicked.connect(self.toggle_theme)
         self.about_btn.clicked.connect(self.show_about_dialog)
 
         buttons_layout.addWidget(self.update_btn)
+        buttons_layout.addWidget(self.search_btn)
         buttons_layout.addWidget(self.pay_btn)
         buttons_layout.addWidget(self.theme_btn)
         buttons_layout.addWidget(self.support_btn)
@@ -1556,13 +2455,26 @@ class VacancyApp(QMainWindow):
 
         self.select_all_btn = QPushButton("Выбрать все")
         self.mark_btn = QPushButton("Пометить просмотренными")
+        self.delete_btn = QPushButton("Удалить")
         self.select_all_btn.setFixedHeight(36)
         self.mark_btn.setFixedHeight(36)
+        self.delete_btn.setFixedHeight(36)
         self.select_all_btn.clicked.connect(self.select_all_new)
         self.mark_btn.clicked.connect(self.mark_selected_as_old)
+        self.delete_btn.clicked.connect(self.delete_selected_vacancies)
+
+        self.status_filter_combo = QComboBox()
+        self.status_filter_combo.addItem("Все", None)
+        self.status_filter_combo.addItem("Новые", "NEW")
+        self.status_filter_combo.addItem("Просмотренные", "OLD")
+        self.status_filter_combo.currentIndexChanged.connect(self.update_table)
 
         action_layout.addWidget(self.select_all_btn)
         action_layout.addWidget(self.mark_btn)
+        action_layout.addWidget(self.delete_btn)
+        action_layout.addStretch()
+        action_layout.addWidget(QLabel("Фильтр:"))
+        action_layout.addWidget(self.status_filter_combo)
         action_layout.addStretch()
         self.action_widget.hide()
         vacancies_layout.addWidget(self.action_widget)
@@ -1621,9 +2533,7 @@ class VacancyApp(QMainWindow):
         self.stats_mode_combo = QComboBox()
         self.stats_mode_combo.addItems([
             "Вакансии по часам (за день)",
-            "Вакансии по дням (неделя)",
             "Вакансии по дням (месяц)",
-            "Вакансии по дням (3 месяца)",
             "Вакансии по дням (6 месяцев)"
         ])
         self.stats_mode_combo.setMinimumWidth(220)
@@ -1665,6 +2575,13 @@ class VacancyApp(QMainWindow):
         stats_tab_layout.addWidget(self.stats_chart_frame)
         self.tab_widget.addTab(stats_tab, "Статистика")
 
+        account_tab = self.build_account_tab()
+        self.tab_widget.addTab(account_tab, "Личный кабинет")
+
+        if self.is_admin:
+            admin_tab = self.build_admin_tab()
+            self.tab_widget.addTab(admin_tab, "Администрирование")
+
         content_layout.addWidget(self.tab_widget)
 
         main_layout.addWidget(content_widget)
@@ -1684,6 +2601,225 @@ class VacancyApp(QMainWindow):
 
         # Восстановление выбранного режима
         self.stats_mode_combo.setCurrentText(self.settings.get('stats_mode', "Вакансии по часам (за день)"))
+
+    def build_account_tab(self):
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        layout.setContentsMargins(15, 12, 15, 12)
+        layout.setSpacing(12)
+
+        profile_group = QGroupBox("Профиль")
+        profile_layout = QFormLayout(profile_group)
+
+        self.profile_first_name = QLineEdit()
+        self.profile_last_name = QLineEdit()
+        self.profile_username = QLineEdit()
+        self.profile_email = QLineEdit()
+        self.profile_phone = QLineEdit()
+
+        profile_layout.addRow("Имя:", self.profile_first_name)
+        profile_layout.addRow("Фамилия:", self.profile_last_name)
+        profile_layout.addRow("Username:", self.profile_username)
+        profile_layout.addRow("Email:", self.profile_email)
+        profile_layout.addRow("Телефон:", self.profile_phone)
+
+        self.profile_save_btn = QPushButton("Сохранить профиль")
+        self.profile_save_btn.clicked.connect(self.save_profile)
+        profile_actions = QHBoxLayout()
+        self.profile_logout_btn = QPushButton("Выйти из профиля")
+        self.profile_logout_btn.clicked.connect(self.logout)
+        profile_actions.addWidget(self.profile_save_btn)
+        profile_actions.addWidget(self.profile_logout_btn)
+        profile_actions.addStretch()
+        profile_layout.addRow(profile_actions)
+
+        subscription_group = QGroupBox("Подписка и платежи")
+        sub_layout = QVBoxLayout(subscription_group)
+
+        sub_info = QHBoxLayout()
+        self.account_status_label = QLabel("Статус: —")
+        self.account_plan_label = QLabel("Тариф: —")
+        self.account_days_label = QLabel("Осталось дней: —")
+        self.account_end_label = QLabel("Дата окончания: —")
+        sub_info.addWidget(self.account_status_label)
+        sub_info.addSpacing(20)
+        sub_info.addWidget(self.account_plan_label)
+        sub_info.addSpacing(20)
+        sub_info.addWidget(self.account_days_label)
+        sub_info.addSpacing(20)
+        sub_info.addWidget(self.account_end_label)
+        sub_layout.addLayout(sub_info)
+
+        payments_actions = QHBoxLayout()
+        self.payment_create_btn = QPushButton("Создать платеж")
+        self.payment_refresh_btn = QPushButton("Обновить платежи")
+        self.payment_check_btn = QPushButton("Проверить статус")
+        self.payment_cancel_btn = QPushButton("Отменить платеж")
+        self.payment_create_btn.clicked.connect(self.create_payment)
+        self.payment_refresh_btn.clicked.connect(self.load_user_payments)
+        self.payment_check_btn.clicked.connect(self.check_selected_payment)
+        self.payment_cancel_btn.clicked.connect(self.cancel_selected_payment)
+        payments_actions.addWidget(self.payment_create_btn)
+        payments_actions.addWidget(self.payment_refresh_btn)
+        payments_actions.addWidget(self.payment_check_btn)
+        payments_actions.addWidget(self.payment_cancel_btn)
+        payments_actions.addStretch()
+        sub_layout.addLayout(payments_actions)
+
+        self.payments_table = QTableWidget()
+        self.payments_table.setColumnCount(8)
+        self.payments_table.setHorizontalHeaderLabels(
+            ["ID", "Тариф", "Месяцев", "Сумма", "Статус", "Создан", "Подтвержден", "Примечание"]
+        )
+        self.payments_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
+        self.payments_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.payments_table.setEditTriggers(QTableWidget.NoEditTriggers)
+        sub_layout.addWidget(self.payments_table)
+
+        layout.addWidget(profile_group)
+        layout.addWidget(subscription_group)
+        layout.addStretch()
+        return tab
+
+    def build_admin_tab(self):
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        layout.setContentsMargins(15, 12, 15, 12)
+        layout.setSpacing(12)
+
+        self.admin_tabs = QTabWidget()
+        self.admin_tabs.addTab(self.build_admin_users_tab(), "Пользователи")
+        self.admin_tabs.addTab(self.build_admin_payments_tab(), "Платежи")
+        self.admin_tabs.addTab(self.build_admin_stats_tab(), "Статистика")
+        self.admin_tabs.addTab(self.build_admin_bot_tab(), "Бот")
+        layout.addWidget(self.admin_tabs)
+        return tab
+
+    def build_admin_users_tab(self):
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        layout.setContentsMargins(10, 10, 10, 10)
+
+        top = QHBoxLayout()
+        self.admin_user_search = QLineEdit()
+        self.admin_user_search.setPlaceholderText("Поиск по имени, username или email")
+        self.admin_user_search.textChanged.connect(self.filter_admin_users)
+        self.admin_user_refresh_btn = QPushButton("Обновить")
+        self.admin_user_refresh_btn.clicked.connect(self.load_admin_users)
+        self.admin_user_edit_btn = QPushButton("Редактировать")
+        self.admin_user_edit_btn.clicked.connect(self.edit_selected_admin_user)
+        self.admin_user_extend_btn = QPushButton("Продлить")
+        self.admin_user_extend_btn.clicked.connect(self.extend_selected_admin_user)
+        self.admin_user_plan_btn = QPushButton("Тариф")
+        self.admin_user_plan_btn.clicked.connect(self.apply_plan_selected_admin_user)
+        self.admin_user_delete_btn = QPushButton("Удалить")
+        self.admin_user_delete_btn.clicked.connect(self.delete_selected_admin_user)
+        top.addWidget(self.admin_user_search)
+        top.addWidget(self.admin_user_refresh_btn)
+        top.addWidget(self.admin_user_edit_btn)
+        top.addWidget(self.admin_user_extend_btn)
+        top.addWidget(self.admin_user_plan_btn)
+        top.addWidget(self.admin_user_delete_btn)
+        layout.addLayout(top)
+
+        self.admin_users_table = QTableWidget()
+        self.admin_users_table.setColumnCount(9)
+        self.admin_users_table.setHorizontalHeaderLabels(
+            ["Telegram ID", "Имя", "Username", "Email", "Статус", "Тариф", "Дней", "Роль", "Создан"]
+        )
+        self.admin_users_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
+        self.admin_users_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.admin_users_table.setEditTriggers(QTableWidget.NoEditTriggers)
+        layout.addWidget(self.admin_users_table)
+        return tab
+
+    def build_admin_payments_tab(self):
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        layout.setContentsMargins(10, 10, 10, 10)
+
+        top = QHBoxLayout()
+        self.admin_payment_status = QComboBox()
+        self.admin_payment_status.addItems(["ALL", "PENDING", "VERIFIED", "REJECTED", "EXPIRED"])
+        self.admin_payment_status.currentIndexChanged.connect(self.load_admin_payments)
+        self.admin_payment_refresh_btn = QPushButton("Обновить")
+        self.admin_payment_refresh_btn.clicked.connect(self.load_admin_payments)
+        self.admin_payment_verify_btn = QPushButton("Подтвердить")
+        self.admin_payment_verify_btn.clicked.connect(self.verify_selected_payment)
+        self.admin_payment_reject_btn = QPushButton("Отклонить")
+        self.admin_payment_reject_btn.clicked.connect(self.reject_selected_payment)
+        top.addWidget(QLabel("Статус:"))
+        top.addWidget(self.admin_payment_status)
+        top.addWidget(self.admin_payment_refresh_btn)
+        top.addWidget(self.admin_payment_verify_btn)
+        top.addWidget(self.admin_payment_reject_btn)
+        top.addStretch()
+        layout.addLayout(top)
+
+        self.admin_payments_table = QTableWidget()
+        self.admin_payments_table.setColumnCount(8)
+        self.admin_payments_table.setHorizontalHeaderLabels(
+            ["ID", "Telegram ID", "Тариф", "Месяцев", "Сумма", "Статус", "Создан", "Примечание"]
+        )
+        self.admin_payments_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
+        self.admin_payments_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.admin_payments_table.setEditTriggers(QTableWidget.NoEditTriggers)
+        layout.addWidget(self.admin_payments_table)
+        return tab
+
+    def build_admin_stats_tab(self):
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        layout.setContentsMargins(10, 10, 10, 10)
+
+        self.admin_stats_label = QLabel("Статистика администратора")
+        self.admin_stats_label.setStyleSheet("font-weight: bold; font-size: 14px;")
+        layout.addWidget(self.admin_stats_label)
+
+        self.admin_stats_details = QLabel("")
+        self.admin_stats_details.setWordWrap(True)
+        layout.addWidget(self.admin_stats_details)
+
+        self.admin_stats_refresh_btn = QPushButton("Обновить")
+        self.admin_stats_refresh_btn.clicked.connect(self.load_admin_stats)
+        layout.addWidget(self.admin_stats_refresh_btn)
+        layout.addStretch()
+        return tab
+
+    def build_admin_bot_tab(self):
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        layout.setContentsMargins(10, 10, 10, 10)
+
+        self.bot_stats_label = QLabel("Статистика бота")
+        self.bot_stats_label.setStyleSheet("font-weight: bold; font-size: 14px;")
+        self.bot_stats_details = QLabel("")
+        self.bot_stats_details.setWordWrap(True)
+
+        layout.addWidget(self.bot_stats_label)
+        layout.addWidget(self.bot_stats_details)
+
+        controls = QHBoxLayout()
+        self.bot_start_btn = QPushButton("Старт")
+        self.bot_restart_btn = QPushButton("Рестарт")
+        self.bot_start_btn.clicked.connect(lambda: self.control_bot("start"))
+        self.bot_restart_btn.clicked.connect(lambda: self.control_bot("restart"))
+        controls.addWidget(self.bot_start_btn)
+        controls.addWidget(self.bot_restart_btn)
+        controls.addStretch()
+        layout.addLayout(controls)
+
+        broadcast_group = QGroupBox("Рассылка")
+        b_layout = QVBoxLayout(broadcast_group)
+        self.broadcast_input = QLineEdit()
+        self.broadcast_input.setPlaceholderText("Текст рассылки")
+        self.broadcast_send_btn = QPushButton("Отправить")
+        self.broadcast_send_btn.clicked.connect(self.send_broadcast)
+        b_layout.addWidget(self.broadcast_input)
+        b_layout.addWidget(self.broadcast_send_btn)
+        layout.addWidget(broadcast_group)
+        layout.addStretch()
+        return tab
 
     def go_older_date(self):
         """Переход к более старой дате (увеличение индекса)"""
@@ -1764,14 +2900,22 @@ class VacancyApp(QMainWindow):
         self.total_label.setText(str(len(self.vacancies)))
         self.new_label.setText(str(new_count))
 
-        if new_count > 0:
-            self.action_widget.show()
-        else:
-            self.action_widget.hide()
-
         sorted_vacancies = sorted(self.vacancies, key=lambda x: self.parse_loaded_date(x.get('loaded_at', '')),
                                   reverse=True)
         sorted_vacancies.sort(key=lambda x: 0 if x.get('status') == 'NEW' else 1)
+
+        status_filter = None
+        if hasattr(self, "status_filter_combo") and self.status_filter_combo:
+            status_filter = self.status_filter_combo.currentData()
+        if status_filter:
+            filtered_vacancies = [v for v in sorted_vacancies if v.get("status") == status_filter]
+        else:
+            filtered_vacancies = list(sorted_vacancies)
+
+        if filtered_vacancies:
+            self.action_widget.show()
+        else:
+            self.action_widget.hide()
 
         for row in range(self.table.rowCount()):
             widget = self.table.cellWidget(row, 0)
@@ -1779,16 +2923,14 @@ class VacancyApp(QMainWindow):
                 self.table.removeCellWidget(row, 0)
                 widget.deleteLater()
 
-        self.table.setRowCount(len(sorted_vacancies))
+        self.table.setRowCount(len(filtered_vacancies))
 
         is_dark = self.settings.get("theme") == "dark"
 
-        for row, v in enumerate(sorted_vacancies):
-            if v.get('status') == 'NEW':
-                checkbox = QCheckBox()
-                self.table.setCellWidget(row, 0, checkbox)
-            else:
-                self.table.setItem(row, 0, QTableWidgetItem(""))
+        for row, v in enumerate(filtered_vacancies):
+            checkbox = QCheckBox()
+            checkbox.setProperty("vacancy_id", v.get("id"))
+            self.table.setCellWidget(row, 0, checkbox)
 
             status_text = "🆕 Новая" if v.get('status') == 'NEW' else "👁️ Просмотрена"
             status_item = QTableWidgetItem(status_text)
@@ -1813,7 +2955,9 @@ class VacancyApp(QMainWindow):
             status_item.setFont(font)
             self.table.setItem(row, 1, status_item)
 
-            self.table.setItem(row, 2, QTableWidgetItem(v.get('title', '-')))
+            title_item = QTableWidgetItem(v.get('title', '-'))
+            title_item.setData(Qt.UserRole, v.get("id"))
+            self.table.setItem(row, 2, title_item)
             self.table.setItem(row, 3, QTableWidgetItem(v.get('company', '-')))
             self.table.setItem(row, 4, QTableWidgetItem(v.get('city', '-')))
 
@@ -1884,14 +3028,10 @@ class VacancyApp(QMainWindow):
             "workTypes": work_types,
             "countries": countries,
             "excludeKeywords": self.settings.get("exclude"),
-            "telegramNotify": self.settings.get("telegram_notify", False)
+            "telegramNotify": self.settings.get("telegram_notify", False) if self.subscription_active else False
         }
 
     def load_vacancies_from_file(self):
-        if not self.subscription_active:
-            self.vacancies = []
-            return
-
         try:
             server_vacancies = self.api.get_vacancies()
             self.vacancies = [self.normalize_vacancy(v) for v in server_vacancies]
@@ -1907,13 +3047,27 @@ class VacancyApp(QMainWindow):
         logger.info("Нажата кнопка 'Обновить'")
         if not self.ensure_authenticated():
             return
-        if not self.subscription_active:
-            return
         self.update_btn.setEnabled(False)
         self.update_btn.setText("⏳ Обновление...")
         old_ids = {v['id'] for v in self.vacancies if v.get("id")}
         search_payload = self.build_search_payload()
-        self.worker = UpdateWorker(self.token, search_payload, old_ids)
+        self.worker = UpdateWorker(self.token, search_payload, old_ids, do_search=False)
+        self.worker.finished.connect(self.on_update_finished_with_server)
+        self.worker.error.connect(self.on_update_error)
+        self.worker.start()
+
+    def run_search(self):
+        logger.info("Запуск поиска на сервере")
+        if self.worker and self.worker.isRunning():
+            logger.info("Обновление уже выполняется, пропускаем")
+            return
+        if not self.ensure_authenticated():
+            return
+        self.search_btn.setEnabled(False)
+        self.search_btn.setText("⏳ Поиск...")
+        old_ids = {v['id'] for v in self.vacancies if v.get("id")}
+        search_payload = self.build_search_payload()
+        self.worker = UpdateWorker(self.token, search_payload, old_ids, do_search=True)
         self.worker.finished.connect(self.on_update_finished_with_server)
         self.worker.error.connect(self.on_update_error)
         self.worker.start()
@@ -1928,6 +3082,8 @@ class VacancyApp(QMainWindow):
 
         self.update_btn.setEnabled(True)
         self.update_btn.setText("🔄 Обновить")
+        self.search_btn.setEnabled(True)
+        self.search_btn.setText("Запустить поиск")
 
         if new_count:
             msg = QMessageBox(self)
@@ -1955,6 +3111,8 @@ class VacancyApp(QMainWindow):
 
         self.update_btn.setEnabled(True)
         self.update_btn.setText("🔄 Обновить")
+        self.search_btn.setEnabled(True)
+        self.search_btn.setText("Запустить поиск")
 
     def select_all_new(self):
         logger.info("Выбор всех новых вакансий")
@@ -1972,19 +3130,17 @@ class VacancyApp(QMainWindow):
         for row in range(self.table.rowCount()):
             checkbox = self.table.cellWidget(row, 0)
             if checkbox and checkbox.isChecked():
-                link_item = self.table.item(row, 9)
-                link = link_item.data(Qt.UserRole) if link_item else ""
-                if link:
-                    for v in self.vacancies:
-                        if v.get('link') == link:
-                            v['status'] = 'OLD'
-                            if v.get("id"):
-                                ids_to_mark.append(v["id"])
-                            updated += 1
-                            break
+                vacancy_id = checkbox.property("vacancy_id")
+                for v in self.vacancies:
+                    if v.get("id") == vacancy_id and v.get("status") == "NEW":
+                        v["status"] = "OLD"
+                        if vacancy_id:
+                            ids_to_mark.append(vacancy_id)
+                        updated += 1
+                        break
 
         if updated > 0:
-            if self.subscription_active and ids_to_mark:
+            if ids_to_mark:
                 try:
                     self.api.mark_multiple_viewed(ids_to_mark)
                 except Exception as e:
@@ -2004,6 +3160,49 @@ class VacancyApp(QMainWindow):
             msg.setText("⚠️ Не выбрано ни одной вакансии")
             msg.setStandardButtons(QMessageBox.Ok)
             msg.exec()
+
+    def delete_selected_vacancies(self):
+        logger.info("Удаление выбранных вакансий")
+        ids_to_delete = []
+        for row in range(self.table.rowCount()):
+            checkbox = self.table.cellWidget(row, 0)
+            if checkbox and checkbox.isChecked():
+                vacancy_id = checkbox.property("vacancy_id")
+                if vacancy_id:
+                    ids_to_delete.append(vacancy_id)
+
+        if not ids_to_delete:
+            msg = QMessageBox(self)
+            msg.setIcon(QMessageBox.Warning)
+            msg.setWindowTitle("Внимание")
+            msg.setText("⚠️ Не выбрано ни одной вакансии")
+            msg.setStandardButtons(QMessageBox.Ok)
+            msg.exec()
+            return
+
+        confirm = QMessageBox.question(
+            self,
+            "Удаление",
+            f"Удалить выбранные вакансии ({len(ids_to_delete)})?",
+            QMessageBox.Yes | QMessageBox.No
+        )
+        if confirm != QMessageBox.Yes:
+            return
+
+        failed = 0
+        for vacancy_id in ids_to_delete:
+            try:
+                self.api.delete_vacancy(vacancy_id)
+            except Exception as e:
+                failed += 1
+                logger.error(f"Ошибка удаления вакансии {vacancy_id}: {e}")
+
+        self.vacancies = [v for v in self.vacancies if v.get("id") not in ids_to_delete]
+        self.update_table()
+        self.update_stats_chart()
+
+        if failed:
+            QMessageBox.warning(self, "Удаление", f"Не удалось удалить: {failed}")
 
     def show_about_dialog(self):
         """Показывает информацию о приложении и разработчике"""
