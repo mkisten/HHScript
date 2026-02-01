@@ -914,15 +914,15 @@ class VacancyApp(QMainWindow):
         self.reconnect_timer = QTimer(self)
         self.reconnect_timer.timeout.connect(self.try_reconnect)
         if not self.authenticate(allow_dialog=False):
-            if self.last_auth_error == "invalid_token":
-                if not self.authenticate(allow_dialog=True):
+            if not self.authenticate(allow_dialog=True):
+                if self.last_auth_error == "network":
                     self.offline_mode = True
                     self.reconnect_timer.start(10000)
                     self.settings = DEFAULT_SETTINGS.copy()
-            else:
-                self.offline_mode = True
-                self.reconnect_timer.start(10000)
-                self.settings = DEFAULT_SETTINGS.copy()
+                else:
+                    QMessageBox.information(self, "Авторизация", "Авторизация не выполнена")
+                    self.close_application()
+                    return
         if not self.offline_mode:
             self.load_settings()
         self.init_ui()  # Сначала создаём UI
@@ -931,11 +931,6 @@ class VacancyApp(QMainWindow):
             self.refresh_account_profile()
             self.refresh_account_subscription()
             self.load_user_payments()
-            if self.is_admin:
-                self.load_admin_users()
-                self.load_admin_payments()
-                self.load_admin_stats()
-                self.load_bot_stats()
         self.load_vacancies_from_file()
         self.populate_stats_dates()  # Теперь stats_date_combo уже существует
         self.on_stats_mode_changed(self.stats_mode_combo.currentText())
@@ -1111,6 +1106,29 @@ class VacancyApp(QMainWindow):
             self.current_user = None
             self.is_admin = False
 
+        if hasattr(self, "tab_widget"):
+            self.update_admin_tabs()
+
+    def update_admin_tabs(self):
+        if not hasattr(self, "tab_widget"):
+            return
+        if self.is_admin and not hasattr(self, "admin_tabs"):
+            admin_tab = self.build_admin_tab()
+            self.tab_widget.addTab(admin_tab, "Администрирование")
+            self.load_admin_users()
+            self.load_admin_payments()
+            self.load_admin_stats()
+            self.load_bot_stats()
+        elif not self.is_admin and hasattr(self, "admin_tabs"):
+            for i in range(self.tab_widget.count()):
+                if self.tab_widget.tabText(i) == "Администрирование":
+                    widget = self.tab_widget.widget(i)
+                    self.tab_widget.removeTab(i)
+                    widget.deleteLater()
+                    break
+            if hasattr(self, "admin_tabs"):
+                del self.admin_tabs
+
     def ensure_authenticated(self):
         if self.offline_mode:
             return False
@@ -1145,11 +1163,7 @@ class VacancyApp(QMainWindow):
             self.refresh_account_profile()
             self.refresh_account_subscription()
             self.load_user_payments()
-            if self.is_admin:
-                self.load_admin_users()
-                self.load_admin_payments()
-                self.load_admin_stats()
-                self.load_bot_stats()
+            self.update_admin_tabs()
             self.load_vacancies_from_file()
             self.populate_stats_dates()
             self.update_table()
@@ -1185,6 +1199,8 @@ class VacancyApp(QMainWindow):
             self.apply_subscription_state()
 
     def apply_subscription_state(self):
+        if self.offline_mode or not self.token:
+            return
         enabled = self.subscription_active
         base_controls = [
             self.query_input,
@@ -1204,7 +1220,6 @@ class VacancyApp(QMainWindow):
 
         auto_controls = [
             self.auto_update_checkbox,
-            self.auto_update_interval,
             self.telegram_notify_checkbox
         ]
         for control in auto_controls:
@@ -1355,7 +1370,8 @@ class VacancyApp(QMainWindow):
             response = self.api.get_admin_users()
             self.admin_users = response.get("users", []) if isinstance(response, dict) else response
             self.filtered_admin_users = list(self.admin_users)
-            self.populate_admin_users()
+            if hasattr(self, "admin_users_table"):
+                self.populate_admin_users()
         except Exception as e:
             QMessageBox.warning(self, "Администратор", f"Не удалось загрузить пользователей: {e}")
 
@@ -1491,11 +1507,7 @@ class VacancyApp(QMainWindow):
         self.refresh_account_profile()
         self.refresh_account_subscription()
         self.load_user_payments()
-        if self.is_admin:
-            self.load_admin_users()
-            self.load_admin_payments()
-            self.load_admin_stats()
-            self.load_bot_stats()
+        self.update_admin_tabs()
         self.load_vacancies_from_file()
         self.populate_stats_dates()
         self.update_table()
@@ -1512,7 +1524,8 @@ class VacancyApp(QMainWindow):
             response = self.api.get_admin_payments(status=status_param)
             payments = response.get("payments", []) if isinstance(response, dict) else response
             self.admin_payments = payments
-            self.populate_admin_payments()
+            if hasattr(self, "admin_payments_table"):
+                self.populate_admin_payments()
         except Exception as e:
             QMessageBox.warning(self, "Администратор", f"Не удалось загрузить платежи: {e}")
 
@@ -1574,7 +1587,8 @@ class VacancyApp(QMainWindow):
                 f"Подтверждены: {payment_stats.get('verifiedPayments')}\n"
                 f"Отклонены: {payment_stats.get('rejectedPayments')}"
             )
-            self.admin_stats_details.setText(details)
+            if hasattr(self, "admin_stats_details"):
+                self.admin_stats_details.setText(details)
         except Exception as e:
             QMessageBox.warning(self, "Администратор", f"Не удалось загрузить статистику: {e}")
 
@@ -1591,7 +1605,8 @@ class VacancyApp(QMainWindow):
                 f"Статус: {stats.get('botStatus')}\n"
                 f"Обновлено: {stats.get('lastUpdate')}"
             )
-            self.bot_stats_details.setText(details)
+            if hasattr(self, "bot_stats_details"):
+                self.bot_stats_details.setText(details)
         except Exception as e:
             QMessageBox.warning(self, "Бот", f"Не удалось загрузить статистику: {e}")
 
@@ -1926,6 +1941,25 @@ class VacancyApp(QMainWindow):
         except Exception as e:
             logger.error(f"Ошибка загрузки настроек с сервера: {e}")
             self.settings = DEFAULT_SETTINGS.copy()
+
+    def reload_settings(self):
+        if self.offline_mode:
+            QMessageBox.warning(self, "Настройки", "Сервер недоступен")
+            return
+        if not self.ensure_authenticated():
+            return
+        self.load_settings()
+        self.query_input.setText(self.settings.get("query", ""))
+        self.exclude_input.setText(self.settings.get("exclude", ""))
+        self.days_input.setValue(self.settings.get("days", 1))
+        self.remote_checkbox.setChecked(self.settings.get('work_types', {}).get('remote', True))
+        self.hybrid_checkbox.setChecked(self.settings.get('work_types', {}).get('hybrid', False))
+        self.office_checkbox.setChecked(self.settings.get('work_types', {}).get('office', False))
+        self.russia_checkbox.setChecked(self.settings.get('countries', {}).get('russia', True))
+        self.belarus_checkbox.setChecked(self.settings.get('countries', {}).get('belarus', True))
+        self.auto_update_checkbox.setChecked(self.settings.get('auto_update', {}).get('enabled', False))
+        self.telegram_notify_checkbox.setChecked(self.settings.get('telegram_notify', False))
+        QMessageBox.information(self, "Настройки", "Настройки обновлены")
 
     def save_settings(self):
         if not self.ensure_authenticated():
@@ -2512,22 +2546,17 @@ class VacancyApp(QMainWindow):
         self.telegram_notify_checkbox.setMinimumHeight(25)
         settings_layout.addWidget(self.telegram_notify_checkbox)
 
-        self.auto_update_interval = QSpinBox()
-        self.auto_update_interval.setRange(1, 1440)
-        self.auto_update_interval.setValue(
-            self.settings.get('auto_update', {}).get('interval_minutes', 30)
-        )
-        self.auto_update_interval.setSuffix(" мин")
-        self.auto_update_interval.setFixedWidth(90)
-        self.auto_update_interval.setMinimumHeight(32)
-        settings_layout.addWidget(self.auto_update_interval)
-
         settings_layout.addStretch()
 
         self.save_settings_btn = QPushButton("Сохранить")
         self.save_settings_btn.setFixedSize(110, 38)
         self.save_settings_btn.clicked.connect(self.save_app_settings)
         settings_layout.addWidget(self.save_settings_btn)
+
+        self.reload_settings_btn = QPushButton("Обновить настройки")
+        self.reload_settings_btn.setFixedSize(150, 38)
+        self.reload_settings_btn.clicked.connect(self.reload_settings)
+        settings_layout.addWidget(self.reload_settings_btn)
 
         top_row.addWidget(settings_card, 2)
         vacancies_layout.addLayout(top_row)
@@ -2576,10 +2605,9 @@ class VacancyApp(QMainWindow):
         vacancies_layout.addWidget(self.action_widget)
 
         self.table = QTableWidget()
-        self.table.setColumnCount(10)
+        self.table.setColumnCount(9)
         self.table.setHorizontalHeaderLabels(
-            ["", "Статус", "Название", "Компания", "Город", "Тип работы", "Зарплата", "Дата", "Дата загрузки",
-             "Действие"])
+            ["", "Статус", "Название", "Компания", "Город", "Тип работы", "Зарплата", "Дата", "Дата загрузки"])
 
         header = self.table.horizontalHeader()
         header.setSectionResizeMode(0, QHeaderView.Fixed)
@@ -2597,8 +2625,7 @@ class VacancyApp(QMainWindow):
         header.resizeSection(7, 90)
         header.setSectionResizeMode(8, QHeaderView.Fixed)
         header.resizeSection(8, 150)
-        header.setSectionResizeMode(9, QHeaderView.Fixed)
-        header.resizeSection(9, 160)
+        # колонка действия удалена
 
         self.table.verticalHeader().setDefaultSectionSize(40)
         self.table.verticalHeader().setVisible(False)
@@ -3063,19 +3090,16 @@ class VacancyApp(QMainWindow):
             self.table.setItem(row, 7, QTableWidgetItem(v.get('date', '-')))
             self.table.setItem(row, 8, QTableWidgetItem(v.get('loaded_at', '-')))
 
-            open_item = QTableWidgetItem("🔗 Открыть")
-            open_item.setData(Qt.UserRole, v.get('link', ''))
-            open_item.setTextAlignment(Qt.AlignCenter)
-            open_item.setForeground(QColor("#BB86FC" if is_dark else "#6200EE"))
-            font = open_item.font()
-            font.setBold(True)
-            open_item.setFont(font)
-            self.table.setItem(row, 9, open_item)
+            title_item = self.table.item(row, 2)
+            if title_item:
+                title_item.setData(Qt.UserRole, v.get('link', ''))
+                title_item.setForeground(QColor("#BB86FC" if is_dark else "#1a73e8"))
+                title_item.setFont(font)
 
         logger.info("Таблица обновлена")
 
     def on_cell_click(self, row, column):
-        if column == 9:
+        if column == 2:
             item = self.table.item(row, column)
             if item:
                 link = item.data(Qt.UserRole)
