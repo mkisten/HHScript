@@ -905,31 +905,48 @@ class VacancyApp(QMainWindow):
         self.filtered_admin_users = []
         self.admin_payments = []
         self.stream_worker = None
+        self.offline_mode = False
+        self.last_auth_error = None
         self.subscription_active = False
         self.subscription_status = None
         self.user_telegram_id = None
         self.pay_dialog_shown = False
-        if not self.authenticate():
-            sys.exit(0)
-        self.load_settings()
+        self.reconnect_timer = QTimer(self)
+        self.reconnect_timer.timeout.connect(self.try_reconnect)
+        if not self.authenticate(allow_dialog=False):
+            if self.last_auth_error == "invalid_token":
+                if not self.authenticate(allow_dialog=True):
+                    self.offline_mode = True
+                    self.reconnect_timer.start(10000)
+                    self.settings = DEFAULT_SETTINGS.copy()
+            else:
+                self.offline_mode = True
+                self.reconnect_timer.start(10000)
+                self.settings = DEFAULT_SETTINGS.copy()
+        if not self.offline_mode:
+            self.load_settings()
         self.init_ui()  # Сначала создаём UI
         self.apply_theme()
-        self.refresh_account_profile()
-        self.refresh_account_subscription()
-        self.load_user_payments()
-        if self.is_admin:
-            self.load_admin_users()
-            self.load_admin_payments()
-            self.load_admin_stats()
-            self.load_bot_stats()
+        if not self.offline_mode:
+            self.refresh_account_profile()
+            self.refresh_account_subscription()
+            self.load_user_payments()
+            if self.is_admin:
+                self.load_admin_users()
+                self.load_admin_payments()
+                self.load_admin_stats()
+                self.load_bot_stats()
         self.load_vacancies_from_file()
         self.populate_stats_dates()  # Теперь stats_date_combo уже существует
         self.on_stats_mode_changed(self.stats_mode_combo.currentText())
         self.update_table()
         self.update_stats_chart()
-        self.setup_auto_update()
+        if not self.offline_mode:
+            self.setup_auto_update()
         self.apply_subscription_state()
-        self.start_stream()
+        self.update_connection_state()
+        if not self.offline_mode:
+            self.start_stream()
 
         self.update_vacancies()
 
@@ -1031,18 +1048,30 @@ class VacancyApp(QMainWindow):
     def save_token(self, token):
         TOKEN_FILE.write_text(json.dumps({"token": token}), encoding="utf-8")
 
-    def authenticate(self):
+    def authenticate(self, allow_dialog=True):
+        self.last_auth_error = None
         token = self.load_token()
         if token:
             self.api.set_token(token)
-            status = self.api.get_subscription_status()
-            if status:
-                self.token = token
-                self.subscription_status = status
-                self.subscription_active = bool(status.get("active"))
-                self.user_telegram_id = status.get("telegramId")
-                self.load_current_user()
-                return True
+            try:
+                status = self.api.get_subscription_status()
+                if status:
+                    self.token = token
+                    self.subscription_status = status
+                    self.subscription_active = bool(status.get("active"))
+                    self.user_telegram_id = status.get("telegramId")
+                    self.load_current_user()
+                    return True
+                self.last_auth_error = "invalid_token"
+                self.api.clear_token()
+                self.token = None
+            except requests.exceptions.RequestException as e:
+                logger.warning(f"Сервер недоступен: {e}")
+                self.last_auth_error = "network"
+                return False
+
+        if not allow_dialog:
+            return False
 
         dialog = TelegramAuthDialog(self.api, self)
         if dialog.exec() != QDialog.Accepted or not dialog.token:
@@ -1052,14 +1081,23 @@ class VacancyApp(QMainWindow):
         self.api.set_token(self.token)
         self.save_token(self.token)
 
-        status = self.api.get_subscription_status()
-        if status:
-            self.subscription_status = status
-            self.subscription_active = bool(status.get("active"))
-            self.user_telegram_id = status.get("telegramId")
-            self.load_current_user()
-        else:
-            self.subscription_active = False
+        try:
+            status = self.api.get_subscription_status()
+            if status:
+                self.subscription_status = status
+                self.subscription_active = bool(status.get("active"))
+                self.user_telegram_id = status.get("telegramId")
+                self.load_current_user()
+            else:
+                self.subscription_active = False
+                self.last_auth_error = "invalid_token"
+                self.api.clear_token()
+                self.token = None
+                return False
+        except requests.exceptions.RequestException as e:
+            logger.warning(f"Сервер недоступен: {e}")
+            self.last_auth_error = "network"
+            return False
         return True
 
     def load_current_user(self):
@@ -1074,6 +1112,8 @@ class VacancyApp(QMainWindow):
             self.is_admin = False
 
     def ensure_authenticated(self):
+        if self.offline_mode:
+            return False
         if not self.token:
             if not self.authenticate():
                 return False
@@ -1094,6 +1134,55 @@ class VacancyApp(QMainWindow):
             self.refresh_account_profile()
         self.apply_subscription_state()
         return True
+
+    def try_reconnect(self):
+        if not self.offline_mode:
+            return
+        if self.authenticate(allow_dialog=False):
+            self.offline_mode = False
+            self.reconnect_timer.stop()
+            self.load_settings()
+            self.refresh_account_profile()
+            self.refresh_account_subscription()
+            self.load_user_payments()
+            if self.is_admin:
+                self.load_admin_users()
+                self.load_admin_payments()
+                self.load_admin_stats()
+                self.load_bot_stats()
+            self.load_vacancies_from_file()
+            self.populate_stats_dates()
+            self.update_table()
+            self.update_stats_chart()
+            self.setup_auto_update()
+            self.apply_subscription_state()
+            self.update_connection_state()
+            self.start_stream()
+
+    def update_connection_state(self):
+        if self.offline_mode:
+            self.sub_status_label.setText("Нет соединения с сервером")
+            self.sub_plan_label.setText("Проверьте подключение")
+            controls = [
+                self.update_btn,
+                self.search_btn,
+                self.save_settings_btn,
+                self.query_input,
+                self.days_input,
+                self.remote_checkbox,
+                self.hybrid_checkbox,
+                self.office_checkbox,
+                self.russia_checkbox,
+                self.belarus_checkbox,
+                self.auto_update_checkbox,
+                self.auto_update_interval,
+                self.telegram_notify_checkbox,
+                self.exclude_input
+            ]
+            for control in controls:
+                control.setEnabled(False)
+        else:
+            self.apply_subscription_state()
 
     def apply_subscription_state(self):
         enabled = self.subscription_active
@@ -1390,9 +1479,13 @@ class VacancyApp(QMainWindow):
         self.current_user = None
         self.is_admin = False
         self.pay_dialog_shown = False
+        self.offline_mode = False
+        self.reconnect_timer.stop()
         QMessageBox.information(self, "Выход", "Вы вышли из профиля")
         if not self.authenticate():
-            self.close_application()
+            self.offline_mode = True
+            self.reconnect_timer.start(10000)
+            self.update_connection_state()
             return
         self.load_settings()
         self.refresh_account_profile()
@@ -1798,6 +1891,9 @@ class VacancyApp(QMainWindow):
             logger.info("Показано уведомление о новых вакансиях")
 
     def load_settings(self):
+        if self.offline_mode:
+            self.settings = DEFAULT_SETTINGS.copy()
+            return
         try:
             server_settings = self.api.get_settings()
             self.user_telegram_id = server_settings.get("telegramId")
@@ -2586,16 +2682,14 @@ class VacancyApp(QMainWindow):
 
         main_layout.addWidget(content_widget)
 
-        # Подключение сохранения настроек для статистики
+        # Локальные настройки статистики без сохранения на сервер
         def save_mode(text):
             self.settings['stats_mode'] = text
-            self.save_settings()
         self.stats_mode_combo.currentTextChanged.connect(save_mode)
 
         def save_date():
             current_data = self.stats_date_combo.currentData()
             self.settings['stats_date'] = current_data.isoformat() if current_data else None
-            self.save_settings()
             self.update_date_buttons()
         self.stats_date_combo.currentIndexChanged.connect(save_date)
 
@@ -3032,6 +3126,9 @@ class VacancyApp(QMainWindow):
         }
 
     def load_vacancies_from_file(self):
+        if self.offline_mode:
+            self.vacancies = []
+            return
         try:
             server_vacancies = self.api.get_vacancies()
             self.vacancies = [self.normalize_vacancy(v) for v in server_vacancies]
@@ -3045,6 +3142,9 @@ class VacancyApp(QMainWindow):
 
     def update_vacancies(self):
         logger.info("Нажата кнопка 'Обновить'")
+        if self.offline_mode:
+            QMessageBox.warning(self, "Нет соединения", "Сервер недоступен. Повторите позже.")
+            return
         if not self.ensure_authenticated():
             return
         self.update_btn.setEnabled(False)
@@ -3058,6 +3158,9 @@ class VacancyApp(QMainWindow):
 
     def run_search(self):
         logger.info("Запуск поиска на сервере")
+        if self.offline_mode:
+            QMessageBox.warning(self, "Нет соединения", "Сервер недоступен. Повторите позже.")
+            return
         if self.worker and self.worker.isRunning():
             logger.info("Обновление уже выполняется, пропускаем")
             return
