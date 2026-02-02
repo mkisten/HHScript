@@ -1958,6 +1958,10 @@ class VacancyApp(QMainWindow):
         self.russia_checkbox.setChecked(self.settings.get('countries', {}).get('russia', True))
         self.belarus_checkbox.setChecked(self.settings.get('countries', {}).get('belarus', True))
         self.auto_update_checkbox.setChecked(self.settings.get('auto_update', {}).get('enabled', False))
+        if hasattr(self, "auto_update_interval"):
+            self.auto_update_interval.setValue(
+                self.settings.get('auto_update', {}).get('interval_minutes', 30)
+            )
         self.telegram_notify_checkbox.setChecked(self.settings.get('telegram_notify', False))
         QMessageBox.information(self, "Настройки", "Настройки обновлены")
 
@@ -2534,12 +2538,25 @@ class VacancyApp(QMainWindow):
         separator3.setFrameShadow(QFrame.Sunken)
         settings_layout.addWidget(separator3)
 
+        auto_update_row = QHBoxLayout()
         self.auto_update_checkbox = QCheckBox("Автообновление")
         self.auto_update_checkbox.setChecked(
             self.settings.get('auto_update', {}).get('enabled', False)
         )
         self.auto_update_checkbox.setMinimumHeight(25)
-        settings_layout.addWidget(self.auto_update_checkbox)
+        auto_update_row.addWidget(self.auto_update_checkbox)
+
+        self.auto_update_interval = QSpinBox()
+        self.auto_update_interval.setMinimum(1)
+        self.auto_update_interval.setMaximum(30)
+        self.auto_update_interval.setValue(
+            self.settings.get('auto_update', {}).get('interval_minutes', 30)
+        )
+        self.auto_update_interval.setSuffix(" мин")
+        self.auto_update_interval.setFixedWidth(110)
+        auto_update_row.addWidget(self.auto_update_interval)
+        auto_update_row.addStretch()
+        settings_layout.addLayout(auto_update_row)
 
         self.telegram_notify_checkbox = QCheckBox("Рассылка в Telegram")
         self.telegram_notify_checkbox.setChecked(self.settings.get('telegram_notify', False))
